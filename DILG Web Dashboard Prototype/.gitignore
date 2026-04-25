@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+vendor/
+pnpm-lock.yaml
+package-lock.json
+yarn.lock
+
+# Build files
+dist/
+build/
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local

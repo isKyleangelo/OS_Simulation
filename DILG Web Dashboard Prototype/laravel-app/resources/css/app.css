@@ -1,0 +1,88 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+html, body {
+    height: 100%;
+    font-family: 'Inter', sans-serif;
+    @apply bg-slate-50;
+}
+
+#app {
+    height: 100%;
+    @apply flex flex-col;
+}
+
+main {
+    @apply flex-1;
+}
+
+/* Animations */
+@keyframes slideIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.tab-content {
+    animation: slideIn 0.3s ease-out;
+}
+
+.tab-content.hidden {
+    display: none !important;
+}
+
+/* Card Styles */
+.card {
+    @apply bg-white rounded-lg border border-gray-200 shadow-sm;
+}
+
+/* Button Styles */
+button {
+    @apply transition-colors duration-200;
+}
+
+button:hover:not(:disabled) {
+    @apply opacity-90;
+}
+
+button:disabled {
+    @apply opacity-50 cursor-not-allowed;
+}
+
+/* Input Styles */
+input, select, textarea {
+    @apply border-gray-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-200;
+}
+
+/* Table Styles */
+table {
+    @apply w-full;
+}
+
+tbody tr {
+    @apply border-b hover:bg-gray-50 transition-colors;
+}
+
+/* Badge Styles */
+.badge {
+    @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
+}
+
+/* Progress Bar */
+.progress {
+    @apply w-full bg-gray-200 rounded-full h-2;
+}
+
+.progress-bar {
+    @apply bg-green-600 h-2 rounded-full;
+}
