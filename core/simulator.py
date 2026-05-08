@@ -110,6 +110,8 @@ class PusoyOSSimulator:
             app.pid = process.pid
             process.app_id = app_id
             process.process_type = 'application'
+            result['app'] = app.to_dict()
+            result['process'] = process.to_dict()
             return result
         else:
             self.application_manager.close_application(app_id)
@@ -119,8 +121,12 @@ class PusoyOSSimulator:
         """Close an application"""
         app = self.application_manager.get_application(app_id)
         if app and app.pid:
+            process = self.process_manager.get_process(app.pid)
             self.process_manager.kill_process(app.pid, 'SIGTERM')
             self.memory_manager.deallocate_memory(app.pid)
+            if process:
+                self.scheduler.remove_process_from_queue(process)
+            self.process_manager.remove_process(app.pid)
         
         return self.application_manager.close_application(app_id)
     
@@ -144,8 +150,12 @@ class PusoyOSSimulator:
         running_processes = self.process_manager.get_running_processes()
         for process in running_processes:
             if process.is_complete():
-                self.memory_manager.deallocate_memory(process.pid)
-                self.scheduler.remove_process_from_queue(process)
+                if getattr(process, 'app_id', None):
+                    self.close_application(process.app_id)
+                else:
+                    self.memory_manager.deallocate_memory(process.pid)
+                    self.scheduler.remove_process_from_queue(process)
+                    self.process_manager.remove_process(process.pid)
     
     def run_simulation(self, cycles=100):
         """Run simulation for N cycles"""

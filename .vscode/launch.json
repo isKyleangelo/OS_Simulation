@@ -1,0 +1,23 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Run OS Simulator",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/app.py",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "env": {
+        "HOST": "127.0.0.1",
+        "PUSOYOS_PORT": "8001"
+      },
+      "serverReadyAction": {
+        "pattern": "Running on http://127.0.0.1:(\\d+)",
+        "uriFormat": "http://127.0.0.1:%s",
+        "action": "openExternally"
+      }
+    }
+  ]
+}

@@ -6,6 +6,7 @@ Author: CMSC 314 Students
 Version: 2.5.0 - Enhanced Interactive Edition
 """
 
+import os
 from flask import Flask, render_template, request, jsonify
 from datetime import datetime, timedelta
 from collections import deque
@@ -1584,6 +1585,10 @@ def kill_process():
         
         if result.get('success'):
             simulator.memory_manager.deallocate_memory(pid)
+            process = simulator.process_manager.get_process(pid)
+            if process:
+                simulator.scheduler.remove_process_from_queue(process)
+            simulator.process_manager.remove_process(pid)
             system_metrics['total_processes_terminated'] += 1
             log_event('process_terminated', {'pid': pid, 'signal': signal})
         else:
@@ -1620,6 +1625,8 @@ def build_task_manager_snapshot():
             'pid': app.get('pid'),
             'status': app.get('status', 'running'),
             'state': process.state.value if process else 'RUNNING',
+            'opened_at': app.get('opened_at'),
+            'window_state': app.get('window_state', 'open'),
             'cpu_usage': app.get('cpu_usage_percent', 0),
             'cpu_time': process.cpu_time if process else app.get('cpu_time', 0),
             'memory': process.memory_required if process else app.get('memory_required', 0),
@@ -1637,6 +1644,8 @@ def build_task_manager_snapshot():
             continue
         if getattr(process, 'process_type', None) == 'application':
             continue
+        if process.state.value == 'TERMINATED':
+            continue
         background_tasks.append({
             'type': 'process',
             'app_id': None,
@@ -1644,6 +1653,8 @@ def build_task_manager_snapshot():
             'pid': process.pid,
             'status': 'terminated' if process.state.value == 'TERMINATED' else 'running',
             'state': process.state.value,
+            'opened_at': process.start_time.isoformat() if getattr(process, 'start_time', None) else None,
+            'window_state': 'hidden',
             'cpu_usage': 0 if process.state.value != 'RUNNING' else 5,
             'cpu_time': process.cpu_time,
             'memory': process.memory_required,
@@ -1703,6 +1714,8 @@ def task_action():
                 result = simulator.process_manager.kill_process(pid, 'SIGTERM')
                 if result.get('success'):
                     simulator.memory_manager.deallocate_memory(pid)
+                    simulator.scheduler.remove_process_from_queue(process)
+                    simulator.process_manager.remove_process(pid)
             else:
                 return jsonify({'success': False, 'message': 'Task not found'}), 404
 
@@ -1718,6 +1731,8 @@ def task_action():
                 result = simulator.process_manager.kill_process(pid, 'SIGKILL')
                 if result.get('success'):
                     simulator.memory_manager.deallocate_memory(pid)
+                    simulator.scheduler.remove_process_from_queue(process)
+                    simulator.process_manager.remove_process(pid)
             else:
                 return jsonify({'success': False, 'message': 'Task not found'}), 404
 
@@ -1808,6 +1823,11 @@ def launch_app():
         data = request.get_json()
         app_id = data.get('app_id')
         result = simulator.launch_application(app_id)
+        if result.get('success'):
+            log_event('app_launched', {
+                'app_id': app_id,
+                'pid': result.get('process', {}).get('pid')
+            })
         return jsonify(result)
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 400
@@ -1820,6 +1840,8 @@ def close_app():
         data = request.get_json()
         app_id = data.get('app_id')
         result = simulator.close_application(app_id)
+        if result.get('success'):
+            log_event('app_closed', {'app_id': app_id})
         return jsonify(result)
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 400
@@ -2635,6 +2657,13 @@ def server_error(error):
 
 if __name__ == '__main__':
     log_event('system_boot', {'hostname': HOSTNAME, 'version': '2.5.0'})
+    port = int(
+        os.environ.get('PUSOYOS_PORT')
+        or os.environ.get('PORT')
+        or os.environ.get('FLASK_RUN_PORT')
+        or 8001
+    )
+    host = os.environ.get('HOST', '127.0.0.1')
     
     print(f"""
     ------------------------------------------------------------------
@@ -2665,11 +2694,11 @@ if __name__ == '__main__':
 
     Server Information:
        Hostname: {HOSTNAME}
-       Running on http://127.0.0.1:8000
+         Running on http://{host}:{port}
        Version: 2.5.0 (Enhanced)
        Status: ONLINE
 
-    Documentation: Visit http://127.0.0.1:8000 to access the UI
+     Documentation: Visit http://{host}:{port} to access the UI
     API Docs: All endpoints support JSON requests
 
     Press CTRL+C to shutdown gracefully...
@@ -2679,5 +2708,6 @@ if __name__ == '__main__':
     print("System initialized and ready for simulation")
     print("=" * 66 + "\n")
     
-    app.run(debug=False, use_reloader=False, port=8000, host='127.0.0.1')
+    log_event('server_starting', {'host': host, 'port': port})
+    app.run(debug=False, use_reloader=False, port=port, host=host)
 

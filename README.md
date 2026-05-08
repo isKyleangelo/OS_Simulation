@@ -65,7 +65,7 @@ python app.py
 ### Step 3: Access the Web Interface
 Open your browser and navigate to:
 ```
-http://localhost:5000
+http://localhost:8001
 ```
 
 ---
@@ -219,9 +219,9 @@ self.io_device = IODevice("Disk")  # Change from "Printer" to "Disk"
 ## Troubleshooting
 
 ### Port Already in Use
-If port 5000 is busy, edit `app.py`:
+If the default port is busy, edit the launch configuration or set `PUSOYOS_PORT`:
 ```python
-app.run(debug=True, port=8000)  # Use different port
+app.run(debug=True, port=8001)  # Clean default port
 ```
 
 ### Flask Not Found
@@ -232,7 +232,7 @@ pip install Flask==2.3.0
 
 ### Browser Can't Connect
 - Make sure Flask server is running: `python app.py`
-- Check that you're accessing: `http://localhost:5000`
+- Check that you're accessing: `http://localhost:8001`
 - Check terminal for any error messages
 
 ---

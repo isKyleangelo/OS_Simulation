@@ -60,12 +60,22 @@ TIME_QUANTUM_SCHEDULING = 5  # Time quantum for Round Robin
 
 # Application Definitions
 APPLICATIONS = {
+    'dashboard': {
+        'name': 'Dashboard',
+        'icon': 'dashboard',
+        'category': 'system',
+        'cpu_usage': 6,
+        'memory_required': 55,
+        'desktop': True,
+        'description': 'System overview'
+    },
     'firefox': {
         'name': 'Firefox Web Browser',
         'icon': '🌐',
         'category': 'internet',
         'cpu_usage': 15,  # percent
         'memory_required': 120,  # MB
+        'desktop': False,
         'description': 'Web Browsing'
     },
     'vscode': {
@@ -74,6 +84,7 @@ APPLICATIONS = {
         'category': 'development',
         'cpu_usage': 20,
         'memory_required': 150,
+        'desktop': False,
         'description': 'Code Development'
     },
     'filemanager': {
@@ -82,6 +93,7 @@ APPLICATIONS = {
         'category': 'system',
         'cpu_usage': 5,
         'memory_required': 45,
+        'desktop': True,
         'description': 'File Browsing'
     },
     'terminal': {
@@ -90,6 +102,7 @@ APPLICATIONS = {
         'category': 'system',
         'cpu_usage': 2,
         'memory_required': 25,
+        'desktop': True,
         'description': 'Command Line'
     },
     'settings': {
@@ -98,7 +111,17 @@ APPLICATIONS = {
         'category': 'system',
         'cpu_usage': 3,
         'memory_required': 40,
+        'desktop': True,
         'description': 'Configuration'
+    },
+    'printer': {
+        'name': 'Print Queue',
+        'icon': '🖨️',
+        'category': 'system',
+        'cpu_usage': 2,
+        'memory_required': 30,
+        'desktop': True,
+        'description': 'Print spooler'
     },
     'taskmanager': {
         'name': 'Task Manager',
@@ -106,7 +129,35 @@ APPLICATIONS = {
         'category': 'system',
         'cpu_usage': 4,
         'memory_required': 35,
+        'desktop': True,
         'description': 'Process Monitor'
+    },
+    'texteditor': {
+        'name': 'Text Editor',
+        'icon': '📝',
+        'category': 'productivity',
+        'cpu_usage': 4,
+        'memory_required': 42,
+        'desktop': True,
+        'description': 'Text editing'
+    },
+    'imageviewer': {
+        'name': 'Image Viewer',
+        'icon': '🖼️',
+        'category': 'media',
+        'cpu_usage': 4,
+        'memory_required': 36,
+        'desktop': True,
+        'description': 'Image viewing'
+    },
+    'pdfviewer': {
+        'name': 'PDF Viewer',
+        'icon': '📄',
+        'category': 'productivity',
+        'cpu_usage': 4,
+        'memory_required': 38,
+        'desktop': True,
+        'description': 'PDF viewing'
     },
     'mediaplay': {
         'name': 'Media Player',
@@ -114,6 +165,16 @@ APPLICATIONS = {
         'category': 'media',
         'cpu_usage': 10,
         'memory_required': 70,
+        'desktop': False,
+        'description': 'Audio/Video'
+    },
+    'mediaplayer': {
+        'name': 'Media Player',
+        'icon': '🎵',
+        'category': 'media',
+        'cpu_usage': 10,
+        'memory_required': 70,
+        'desktop': True,
         'description': 'Audio/Video'
     },
     'messenger': {
@@ -122,6 +183,7 @@ APPLICATIONS = {
         'category': 'communication',
         'cpu_usage': 12,
         'memory_required': 85,
+        'desktop': False,
         'description': 'Messaging'
     }
 }

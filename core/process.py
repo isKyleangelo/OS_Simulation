@@ -104,6 +104,7 @@ class Process:
             'pid': self.pid,
             'name': self.name,
             'state': self.state.value,
+            'started_at': self.start_time.isoformat() if self.start_time else None,
             'priority': self.priority,
             'memory_required': self.memory_required,
             'memory_allocated': self.memory_allocated,

@@ -40,6 +40,8 @@ class Application:
             'name': self.name,
             'pid': self.pid,
             'status': self.status,
+            'opened_at': self.start_time.isoformat(),
+            'window_state': 'open' if self.window_open else 'closed',
             'cpu_usage_percent': self.cpu_usage,
             'memory_required': self.memory_required,
             'memory_used': self.memory_used,
@@ -103,6 +105,8 @@ class ApplicationManager:
         """Get list of available applications with running status"""
         available = []
         for app_id, app_info in self.applications.items():
+            if not app_info.get('desktop', False):
+                continue
             available.append({
                 'app_id': app_id,
                 'name': app_info['name'],
@@ -113,7 +117,7 @@ class ApplicationManager:
                 'memory_required': app_info['memory_required'],
                 'running': app_id in self.running_apps
             })
-        return available
+        return sorted(available, key=lambda app: app['name'].lower())
     
     def get_application(self, app_id):
         """Get running application"""
