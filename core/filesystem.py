@@ -65,6 +65,7 @@ class File:
             'size': self.size,
             'size_kb': self.get_size_kb(),
             'extension': self.extension,
+            'content': self.content,
             'created_at': self.created_at.isoformat(),
             'modified_at': self.modified_at.isoformat(),
             'accessed_at': self.accessed_at.isoformat()
@@ -154,6 +155,8 @@ class FileSystem:
             file = self.files[old_name]
             file.filename = new_name
             file.path = f'{ROOT_DIRECTORY}/{new_name}'
+            file.extension = new_name.split('.')[-1] if '.' in new_name else 'txt'
+            file.modified_at = datetime.now()
             self.files[new_name] = file
             del self.files[old_name]
             return True

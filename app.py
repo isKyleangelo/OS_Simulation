@@ -9,8 +9,10 @@ Version: 2.5.0 - Enhanced Interactive Edition
 from flask import Flask, render_template, request, jsonify
 from datetime import datetime, timedelta
 from collections import deque
+from math import ceil
+import posixpath
 from core.simulator import PusoyOSSimulator
-from config import HOSTNAME, SYSTEM_NAME, SYSTEM_VERSION
+from config import HOSTNAME, SYSTEM_NAME, SYSTEM_VERSION, ROOT_DIRECTORY
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -21,6 +23,53 @@ app.jinja_env.cache = {}  # Clear Jinja2 cache
 # Create global simulator instance
 simulator = PusoyOSSimulator()
 simulator.is_running = True
+
+# Desktop filesystem and printing state live in memory, just like the simulator.
+# They wrap the original flat filesystem with folders, file associations, and
+# OS-style print spooling without touching the user's real disk.
+HOME_PATH = ROOT_DIRECTORY
+VIRTUAL_DIRECTORIES = {
+    HOME_PATH,
+    f'{HOME_PATH}/Desktop',
+    f'{HOME_PATH}/Documents',
+    f'{HOME_PATH}/Pictures',
+    f'{HOME_PATH}/Music',
+    f'{HOME_PATH}/Downloads',
+    f'{HOME_PATH}/System',
+}
+
+TEXT_EXTENSIONS = {'txt', 'log', 'md', 'py', 'js', 'html', 'css', 'json', 'csv'}
+IMAGE_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp'}
+PDF_EXTENSIONS = {'pdf'}
+MEDIA_EXTENSIONS = {'mp3', 'wav', 'ogg', 'm4a'}
+
+system_preferences = {
+    'theme': 'dark',
+    'wallpaper': 'aurora',
+    'accent': '#2f7df6'
+}
+
+printers = [
+    {
+        'id': 'office-laser',
+        'name': 'PusoyOffice Laser 314',
+        'driver': 'PS-314 Universal',
+        'location': 'CMSC Lab',
+        'status': 'Online',
+        'default': True,
+    },
+    {
+        'id': 'pdf-printer',
+        'name': 'Print to PDF',
+        'driver': 'Virtual PDF Driver',
+        'location': 'Local',
+        'status': 'Online',
+        'default': False,
+    }
+]
+print_jobs = []
+print_history = deque(maxlen=100)
+print_job_counter = 7000
 
 # ===========================
 # SYSTEM MONITORING & ANALYTICS
@@ -47,6 +96,408 @@ def log_event(event_type, details):
     }
     system_events.append(event)
     return event
+
+
+def normalize_desktop_path(path=None, parent=None, name=None):
+    """Return a safe virtual path under the simulated home directory."""
+    if name is not None:
+        base = normalize_desktop_path(parent or HOME_PATH)
+        path = f'{base}/{name}'
+
+    raw_path = (path or HOME_PATH).strip().replace('\\', '/')
+    if not raw_path:
+        raw_path = HOME_PATH
+    if not raw_path.startswith('/'):
+        raw_path = f'{HOME_PATH}/{raw_path}'
+
+    normalized = posixpath.normpath(raw_path)
+    if normalized in ('.', '/'):
+        normalized = HOME_PATH
+    if normalized != HOME_PATH and not normalized.startswith(f'{HOME_PATH}/'):
+        normalized = posixpath.normpath(f'{HOME_PATH}/{normalized.lstrip("/")}')
+    return normalized
+
+
+def relative_file_key(path):
+    """Convert an absolute virtual path to the filesystem's relative key."""
+    normalized = normalize_desktop_path(path)
+    relative = normalized[len(HOME_PATH):].lstrip('/')
+    return relative
+
+
+def ensure_parent_directories(path):
+    """Create all virtual parent folders for a path."""
+    current = HOME_PATH
+    VIRTUAL_DIRECTORIES.add(current)
+    for part in relative_file_key(path).split('/')[:-1]:
+        if not part:
+            continue
+        current = f'{current}/{part}'
+        VIRTUAL_DIRECTORIES.add(current)
+
+
+def file_extension(name):
+    """Return a normalized file extension without the dot."""
+    basename = posixpath.basename(name)
+    return basename.rsplit('.', 1)[-1].lower() if '.' in basename else ''
+
+
+def file_association(extension):
+    """Map a file type to the application that should open it."""
+    ext = (extension or '').lower()
+    if ext in TEXT_EXTENSIONS:
+        return 'texteditor'
+    if ext in IMAGE_EXTENSIONS:
+        return 'imageviewer'
+    if ext in PDF_EXTENSIONS:
+        return 'pdfviewer'
+    if ext in MEDIA_EXTENSIONS:
+        return 'mediaplayer'
+    return 'texteditor'
+
+
+def full_path_for_file(file_obj):
+    """Translate a File object into a virtual absolute path."""
+    filename = file_obj.filename.replace('\\', '/')
+    if filename.startswith(HOME_PATH):
+        return normalize_desktop_path(filename)
+    return normalize_desktop_path(f'{HOME_PATH}/{filename}')
+
+
+def get_file_by_path(path):
+    """Find a file by virtual absolute path."""
+    key = relative_file_key(path)
+    return simulator.filesystem.get_file(key)
+
+
+def serialize_file_entry(file_obj):
+    """Build the common file entry used by file manager and app launchers."""
+    path = full_path_for_file(file_obj)
+    name = posixpath.basename(path)
+    ext = file_extension(name)
+    return {
+        'type': 'file',
+        'name': name,
+        'filename': file_obj.filename,
+        'path': path,
+        'parent': posixpath.dirname(path),
+        'extension': ext,
+        'association': file_association(ext),
+        'size': file_obj.size,
+        'size_kb': file_obj.get_size_kb(),
+        'owner': file_obj.owner,
+        'permissions': file_obj.permissions,
+        'created_at': file_obj.created_at.isoformat(),
+        'modified_at': file_obj.modified_at.isoformat(),
+        'accessed_at': file_obj.accessed_at.isoformat(),
+    }
+
+
+def serialize_folder_entry(path):
+    """Build the common folder entry used by the desktop file manager."""
+    normalized = normalize_desktop_path(path)
+    return {
+        'type': 'folder',
+        'name': posixpath.basename(normalized) or 'Home',
+        'path': normalized,
+        'parent': None if normalized == HOME_PATH else posixpath.dirname(normalized),
+        'extension': '',
+        'association': 'filemanager',
+        'size': 0,
+        'modified_at': None,
+    }
+
+
+def breadcrumbs_for(path):
+    """Build clickable breadcrumb segments for a virtual path."""
+    normalized = normalize_desktop_path(path)
+    crumbs = [{'name': 'Home', 'path': HOME_PATH}]
+    relative = normalized[len(HOME_PATH):].strip('/')
+    running = HOME_PATH
+    for part in relative.split('/'):
+        if not part:
+            continue
+        running = f'{running}/{part}'
+        crumbs.append({'name': part, 'path': running})
+    return crumbs
+
+
+def create_virtual_file(path, content='', owner='root', permissions='644'):
+    """Create a file at a virtual path, including missing parent folders."""
+    normalized = normalize_desktop_path(path)
+    ensure_parent_directories(normalized)
+    key = relative_file_key(normalized)
+    return simulator.filesystem.create_file(key, owner=owner, permissions=permissions, content=content)
+
+
+def list_virtual_directory(path=HOME_PATH, search=''):
+    """List folders and files for the desktop file manager."""
+    normalized = normalize_desktop_path(path)
+    VIRTUAL_DIRECTORIES.add(HOME_PATH)
+    if normalized not in VIRTUAL_DIRECTORIES:
+        VIRTUAL_DIRECTORIES.add(normalized)
+
+    query = (search or '').strip().lower()
+    folder_entries = []
+    for directory in sorted(VIRTUAL_DIRECTORIES):
+        if directory == normalized:
+            continue
+        parent = posixpath.dirname(directory)
+        direct_child = parent == normalized
+        descendant_match = query and directory.startswith(f'{normalized}/')
+        if direct_child or descendant_match:
+            entry = serialize_folder_entry(directory)
+            if not query or query in entry['name'].lower():
+                folder_entries.append(entry)
+
+    file_entries = []
+    for file_obj in simulator.filesystem.get_all_files():
+        entry = serialize_file_entry(file_obj)
+        direct_child = entry['parent'] == normalized
+        descendant_match = query and entry['path'].startswith(f'{normalized}/')
+        if direct_child or descendant_match:
+            if not query or query in entry['name'].lower():
+                file_entries.append(entry)
+
+    entries = sorted(folder_entries, key=lambda item: item['name'].lower())
+    entries.extend(sorted(file_entries, key=lambda item: item['name'].lower()))
+    return {
+        'path': normalized,
+        'parent': None if normalized == HOME_PATH else posixpath.dirname(normalized),
+        'breadcrumbs': breadcrumbs_for(normalized),
+        'entries': entries,
+        'count': len(entries),
+        'search': search or '',
+    }
+
+
+def rename_virtual_path(old_path, new_name):
+    """Rename a file or folder inside the virtual filesystem."""
+    old_path = normalize_desktop_path(old_path)
+    clean_name = posixpath.basename((new_name or '').strip().replace('\\', '/'))
+    if not clean_name:
+        return False, 'Name is required'
+
+    parent = posixpath.dirname(old_path)
+    new_path = normalize_desktop_path(parent=parent, name=clean_name)
+    if old_path == HOME_PATH:
+        return False, 'Home cannot be renamed'
+    if new_path in VIRTUAL_DIRECTORIES or get_file_by_path(new_path):
+        return False, 'An item with that name already exists'
+
+    if old_path in VIRTUAL_DIRECTORIES:
+        affected_dirs = sorted(
+            [d for d in VIRTUAL_DIRECTORIES if d == old_path or d.startswith(f'{old_path}/')],
+            key=len
+        )
+        for directory in affected_dirs:
+            VIRTUAL_DIRECTORIES.remove(directory)
+            VIRTUAL_DIRECTORIES.add(directory.replace(old_path, new_path, 1))
+
+        for file_obj in list(simulator.filesystem.get_all_files()):
+            path = full_path_for_file(file_obj)
+            if path.startswith(f'{old_path}/'):
+                simulator.filesystem.rename_file(
+                    relative_file_key(path),
+                    relative_file_key(path.replace(old_path, new_path, 1))
+                )
+        return True, 'Folder renamed'
+
+    file_obj = get_file_by_path(old_path)
+    if not file_obj:
+        return False, 'File not found'
+
+    success = simulator.filesystem.rename_file(relative_file_key(old_path), relative_file_key(new_path))
+    return success, 'File renamed' if success else 'Rename failed'
+
+
+def delete_virtual_path(path):
+    """Delete a file or folder from the virtual filesystem."""
+    normalized = normalize_desktop_path(path)
+    if normalized == HOME_PATH:
+        return False, 'Home cannot be deleted'
+
+    if normalized in VIRTUAL_DIRECTORIES:
+        for file_obj in list(simulator.filesystem.get_all_files()):
+            file_path = full_path_for_file(file_obj)
+            if file_path.startswith(f'{normalized}/'):
+                simulator.filesystem.delete_file(relative_file_key(file_path))
+        for directory in sorted(
+            [d for d in VIRTUAL_DIRECTORIES if d == normalized or d.startswith(f'{normalized}/')],
+            key=len,
+            reverse=True
+        ):
+            VIRTUAL_DIRECTORIES.discard(directory)
+        return True, 'Folder deleted'
+
+    if get_file_by_path(normalized):
+        return simulator.filesystem.delete_file(relative_file_key(normalized)), 'File deleted'
+    return False, 'Item not found'
+
+
+def move_virtual_path(source_path, destination_folder):
+    """Move a file or folder into another virtual folder."""
+    source_path = normalize_desktop_path(source_path)
+    destination_folder = normalize_desktop_path(destination_folder)
+    if destination_folder not in VIRTUAL_DIRECTORIES:
+        return False, 'Destination folder not found'
+    if source_path == HOME_PATH or destination_folder.startswith(f'{source_path}/'):
+        return False, 'Cannot move item there'
+    if posixpath.dirname(source_path) == destination_folder:
+        return True, 'Item is already in that folder'
+    return _move_virtual_path_to_folder(source_path, destination_folder)
+
+
+def _move_virtual_path_to_folder(source_path, destination_folder):
+    """Internal move helper once validation is complete."""
+    new_path = normalize_desktop_path(parent=destination_folder, name=posixpath.basename(source_path))
+    if new_path in VIRTUAL_DIRECTORIES or get_file_by_path(new_path):
+        return False, 'Destination already contains that item'
+
+    if source_path in VIRTUAL_DIRECTORIES:
+        affected_dirs = sorted(
+            [d for d in VIRTUAL_DIRECTORIES if d == source_path or d.startswith(f'{source_path}/')],
+            key=len
+        )
+        for directory in affected_dirs:
+            VIRTUAL_DIRECTORIES.remove(directory)
+            VIRTUAL_DIRECTORIES.add(directory.replace(source_path, new_path, 1))
+        for file_obj in list(simulator.filesystem.get_all_files()):
+            path = full_path_for_file(file_obj)
+            if path.startswith(f'{source_path}/'):
+                simulator.filesystem.rename_file(
+                    relative_file_key(path),
+                    relative_file_key(path.replace(source_path, new_path, 1))
+                )
+        return True, 'Folder moved'
+
+    file_obj = get_file_by_path(source_path)
+    if not file_obj:
+        return False, 'File not found'
+    success = simulator.filesystem.rename_file(relative_file_key(source_path), relative_file_key(new_path))
+    return success, 'File moved' if success else 'Move failed'
+
+
+def sample_image_data_url():
+    """Return a lightweight embedded image for the simulated image viewer."""
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 560">'
+        '<rect width="900" height="560" fill="%23101f3f"/>'
+        '<rect x="70" y="70" width="760" height="420" rx="22" fill="%23f8fafc"/>'
+        '<circle cx="245" cy="210" r="72" fill="%23f5b23c"/>'
+        '<path d="M90 455 305 270 445 385 560 300 810 455Z" fill="%232f7df6"/>'
+        '<path d="M90 455 330 330 485 455Z" fill="%2314b88f"/>'
+        '<text x="450" y="132" text-anchor="middle" font-family="Segoe UI,Arial" font-size="38" fill="%23182735">PusoyOS Gallery</text>'
+        '</svg>'
+    )
+    return f'data:image/svg+xml;utf8,{svg}'
+
+
+def ensure_desktop_demo_files():
+    """Seed practical sample files so every file association has something to open."""
+    samples = {
+        f'{HOME_PATH}/Documents/welcome.txt': (
+            'Welcome to PusoyOS.\n\n'
+            'This document opens in Text Editor, can be saved, and can be sent to the print queue.'
+        ),
+        f'{HOME_PATH}/Documents/print-demo.md': (
+            '# Printing demo\n\n'
+            'Use File Manager to open this file in Text Editor, then choose Print. '
+            'The job will move from Waiting to Printing to Completed.'
+        ),
+        f'{HOME_PATH}/Pictures/sample-landscape.png': sample_image_data_url(),
+        f'{HOME_PATH}/Downloads/course-outline.pdf': (
+            'PusoyOS PDF Viewer\n\n'
+            'Simulated one-page PDF content for CMSC 314. '
+            'The viewer opens PDF-associated files from File Manager.'
+        ),
+        f'{HOME_PATH}/Music/startup-theme.mp3': (
+            'PUSOYOS_MEDIA\n'
+            'title=Startup Theme\n'
+            'artist=CMSC 314\n'
+            'duration=95'
+        ),
+    }
+    for path, content in samples.items():
+        if not get_file_by_path(path):
+            create_virtual_file(path, content=content, owner='student')
+
+
+def get_printer(printer_id):
+    """Find a configured printer by id."""
+    return next((printer for printer in printers if printer['id'] == printer_id), None)
+
+
+def serialize_print_job(job):
+    """Return a JSON-safe print job copy."""
+    return {
+        **job,
+        'created_at': job['created_at'].isoformat(),
+        'started_at': job['started_at'].isoformat() if job.get('started_at') else None,
+        'completed_at': job['completed_at'].isoformat() if job.get('completed_at') else None,
+    }
+
+
+def add_print_history(job, event_type, message):
+    """Store a concise print history event."""
+    print_history.appendleft({
+        'timestamp': datetime.now().isoformat(),
+        'job_id': job['id'],
+        'document_name': job['document_name'],
+        'event': event_type,
+        'message': message,
+    })
+
+
+def refresh_print_system():
+    """Advance print jobs based on elapsed time, like a small print spooler."""
+    now = datetime.now()
+
+    for job in print_jobs:
+        if job['status'] != 'Printing':
+            continue
+        printer = get_printer(job['printer_id'])
+        if not printer or printer['status'] == 'Offline':
+            job['status'] = 'Error'
+            job['completed_at'] = now
+            add_print_history(job, 'error', 'Printer went offline while printing')
+            continue
+        elapsed = (now - job['started_at']).total_seconds()
+        job['progress'] = min(100, int((elapsed / job['duration_seconds']) * 100))
+        if elapsed >= job['duration_seconds']:
+            job['status'] = 'Completed'
+            job['progress'] = 100
+            job['completed_at'] = now
+            add_print_history(job, 'completed', 'Print job completed')
+
+    for printer in printers:
+        if printer['status'] == 'Offline':
+            continue
+        is_busy = any(
+            job['printer_id'] == printer['id'] and job['status'] == 'Printing'
+            for job in print_jobs
+        )
+        printer['status'] = 'Busy' if is_busy else 'Online'
+
+    for printer in printers:
+        if printer['status'] != 'Online':
+            continue
+        next_job = next(
+            (
+                job for job in print_jobs
+                if job['printer_id'] == printer['id'] and job['status'] == 'Waiting'
+            ),
+            None
+        )
+        if next_job:
+            next_job['status'] = 'Printing'
+            next_job['started_at'] = now
+            next_job['progress'] = 0
+            printer['status'] = 'Busy'
+            add_print_history(next_job, 'printing', 'Printer started the job')
+
+
+ensure_desktop_demo_files()
 
 
 def serialize_io_request(req):
@@ -872,6 +1323,164 @@ def printer_process():
     })
 
 
+@app.route('/api/print-system', methods=['GET'])
+def print_system():
+    """Return the desktop print spooler state."""
+    refresh_print_system()
+    return jsonify({
+        'success': True,
+        'printers': printers,
+        'jobs': [serialize_print_job(job) for job in print_jobs],
+        'active_jobs': [
+            serialize_print_job(job) for job in print_jobs
+            if job['status'] in ['Waiting', 'Printing', 'Error']
+        ],
+        'history': list(print_history),
+    })
+
+
+@app.route('/api/print-jobs', methods=['POST'])
+def create_print_job():
+    """Submit a document to the simulated print spooler."""
+    global print_job_counter
+    try:
+        refresh_print_system()
+        data = request.get_json() or {}
+        document_name = data.get('document_name') or 'Untitled Document'
+        content = data.get('content', '')
+        printer_id = data.get('printer_id') or next((p['id'] for p in printers if p.get('default')), printers[0]['id'])
+        printer = get_printer(printer_id)
+        if not printer:
+            return jsonify({'success': False, 'error': 'Printer not found'}), 404
+
+        copies = max(1, int(data.get('copies', 1)))
+        pages = max(1, ceil(max(1, len(content)) / 1500))
+        duration = min(18, max(4, pages * copies * 3))
+        print_job_counter += 1
+        job = {
+            'id': print_job_counter,
+            'document_name': document_name,
+            'source_app': data.get('source_app', 'Text Editor'),
+            'printer_id': printer_id,
+            'printer_name': printer['name'],
+            'status': 'Waiting',
+            'progress': 0,
+            'pages': pages,
+            'copies': copies,
+            'page_size': data.get('page_size', 'Letter'),
+            'orientation': data.get('orientation', 'Portrait'),
+            'color_mode': data.get('color_mode', 'Black and white'),
+            'quality': data.get('quality', 'Normal'),
+            'duration_seconds': duration,
+            'content_preview': content[:600],
+            'created_at': datetime.now(),
+            'started_at': None,
+            'completed_at': None,
+        }
+        print_jobs.append(job)
+        add_print_history(job, 'queued', 'Document entered the print queue')
+        simulator.io_system.submit_io_request(0, 'printer', operation='print', data_size=max(128, pages * copies * 128))
+        refresh_print_system()
+        log_event('desktop_print_job_submitted', {
+            'job_id': job['id'],
+            'document': document_name,
+            'printer': printer_id,
+            'pages': pages,
+        })
+        return jsonify({
+            'success': True,
+            'message': 'Print job submitted',
+            'job': serialize_print_job(job),
+            'print_system': {
+                'printers': printers,
+                'jobs': [serialize_print_job(item) for item in print_jobs],
+                'history': list(print_history),
+            }
+        })
+    except Exception as e:
+        log_event('desktop_print_job_error', {'error': str(e)})
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+
+@app.route('/api/print-jobs/<int:job_id>/cancel', methods=['POST'])
+def cancel_print_job(job_id):
+    """Cancel a waiting or printing job."""
+    refresh_print_system()
+    job = next((item for item in print_jobs if item['id'] == job_id), None)
+    if not job:
+        return jsonify({'success': False, 'error': 'Print job not found'}), 404
+    if job['status'] in ['Completed', 'Cancelled']:
+        return jsonify({'success': False, 'error': f'Job is already {job["status"].lower()}'}), 400
+
+    job['status'] = 'Cancelled'
+    job['completed_at'] = datetime.now()
+    add_print_history(job, 'cancelled', 'Print job cancelled by user')
+    refresh_print_system()
+    log_event('desktop_print_job_cancelled', {'job_id': job_id})
+    return jsonify({'success': True, 'message': 'Print job cancelled', 'job': serialize_print_job(job)})
+
+
+@app.route('/api/print-jobs/<int:job_id>/retry', methods=['POST'])
+def retry_print_job(job_id):
+    """Return an errored job to the waiting queue."""
+    refresh_print_system()
+    job = next((item for item in print_jobs if item['id'] == job_id), None)
+    if not job:
+        return jsonify({'success': False, 'error': 'Print job not found'}), 404
+    if job['status'] != 'Error':
+        return jsonify({'success': False, 'error': 'Only errored jobs can be retried'}), 400
+    job['status'] = 'Waiting'
+    job['progress'] = 0
+    job['started_at'] = None
+    job['completed_at'] = None
+    add_print_history(job, 'retry', 'Print job returned to the queue')
+    refresh_print_system()
+    return jsonify({'success': True, 'message': 'Print job queued again', 'job': serialize_print_job(job)})
+
+
+@app.route('/api/printers/<printer_id>/status', methods=['POST'])
+def update_printer_status(printer_id):
+    """Toggle a printer between online and offline."""
+    try:
+        printer = get_printer(printer_id)
+        if not printer:
+            return jsonify({'success': False, 'error': 'Printer not found'}), 404
+        data = request.get_json() or {}
+        status = data.get('status', 'Online')
+        if status not in ['Online', 'Offline']:
+            return jsonify({'success': False, 'error': 'Status must be Online or Offline'}), 400
+        printer['status'] = status
+        refresh_print_system()
+        log_event('printer_status_changed', {'printer_id': printer_id, 'status': status})
+        return jsonify({'success': True, 'printer': printer})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+
+@app.route('/api/printers/install', methods=['POST'])
+def install_printer():
+    """Install a simulated printer driver and printer."""
+    try:
+        data = request.get_json() or {}
+        name = data.get('name') or f'Lab Printer {len(printers) + 1}'
+        printer_id = ''.join(ch.lower() if ch.isalnum() else '-' for ch in name).strip('-')
+        if get_printer(printer_id):
+            printer_id = f'{printer_id}-{len(printers) + 1}'
+        printer = {
+            'id': printer_id,
+            'name': name,
+            'driver': data.get('driver') or 'Generic PusoyOS Driver',
+            'location': data.get('location') or 'Local',
+            'status': 'Online',
+            'default': False,
+        }
+        printers.append(printer)
+        log_event('printer_driver_installed', {'printer_id': printer_id, 'name': name})
+        return jsonify({'success': True, 'message': 'Printer installed', 'printer': printer})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+
 # ===========================
 # API ROUTES - Process Management
 # ===========================
@@ -897,6 +1506,7 @@ def create_process():
         
         # Check system state before creation
         state = validate_system_state()
+        new_metrics = calculate_system_metrics()
         
         # Create process
         process = simulator.create_process(name, burst_time, memory, io_ops, priority)
@@ -1222,19 +1832,195 @@ def close_app():
 @app.route('/api/files', methods=['GET'])
 def files():
     """Get all files"""
-    return jsonify(simulator.get_files())
+    files_payload = simulator.get_files()
+    files_payload['entries'] = [serialize_file_entry(f) for f in simulator.filesystem.get_all_files()]
+    return jsonify(files_payload)
+
+
+@app.route('/api/fs/list', methods=['GET'])
+def fs_list():
+    """List a virtual folder with optional search."""
+    path = request.args.get('path', HOME_PATH)
+    search = request.args.get('search', '')
+    return jsonify({
+        'success': True,
+        **list_virtual_directory(path, search)
+    })
+
+
+@app.route('/api/fs/open', methods=['POST'])
+def fs_open():
+    """Open a file and return content plus its associated application."""
+    try:
+        data = request.get_json() or {}
+        path = data.get('path') or data.get('filename')
+        if not path:
+            return jsonify({'success': False, 'error': 'Path is required'}), 400
+        file_obj = get_file_by_path(path)
+        if not file_obj:
+            return jsonify({'success': False, 'error': 'File not found'}), 404
+        content = file_obj.read()
+        entry = serialize_file_entry(file_obj)
+        log_event('file_opened', {'path': entry['path'], 'association': entry['association']})
+        return jsonify({'success': True, 'entry': entry, 'content': content})
+    except Exception as e:
+        log_event('file_open_error', {'error': str(e)})
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+
+@app.route('/api/fs/create-file', methods=['POST'])
+def fs_create_file():
+    """Create a file in a virtual folder."""
+    try:
+        data = request.get_json() or {}
+        name = data.get('name') or data.get('filename') or 'untitled.txt'
+        directory = data.get('directory') or data.get('parent') or HOME_PATH
+        content = data.get('content', '')
+        path = data.get('path') or normalize_desktop_path(parent=directory, name=name)
+        if get_file_by_path(path):
+            return jsonify({'success': False, 'error': 'File already exists'}), 400
+        file_obj = create_virtual_file(path, content=content, owner='student')
+        if not file_obj:
+            return jsonify({'success': False, 'error': 'Unable to create file'}), 400
+        entry = serialize_file_entry(file_obj)
+        log_event('file_created', {'path': entry['path'], 'size': len(content)})
+        return jsonify({'success': True, 'message': 'File created', 'entry': entry})
+    except Exception as e:
+        log_event('file_creation_error', {'error': str(e)})
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+
+@app.route('/api/fs/create-folder', methods=['POST'])
+def fs_create_folder():
+    """Create a virtual folder."""
+    try:
+        data = request.get_json() or {}
+        name = posixpath.basename((data.get('name') or 'New Folder').strip().replace('\\', '/'))
+        directory = normalize_desktop_path(data.get('directory') or data.get('parent') or HOME_PATH)
+        path = normalize_desktop_path(parent=directory, name=name)
+        if path in VIRTUAL_DIRECTORIES or get_file_by_path(path):
+            return jsonify({'success': False, 'error': 'Folder already exists'}), 400
+        VIRTUAL_DIRECTORIES.add(path)
+        log_event('folder_created', {'path': path})
+        return jsonify({'success': True, 'message': 'Folder created', 'entry': serialize_folder_entry(path)})
+    except Exception as e:
+        log_event('folder_creation_error', {'error': str(e)})
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+
+@app.route('/api/fs/save', methods=['POST'])
+def fs_save():
+    """Save content to a virtual file, creating it if needed."""
+    try:
+        data = request.get_json() or {}
+        path = data.get('path')
+        filename = data.get('filename')
+        content = data.get('content', '')
+        if not path and filename:
+            path = normalize_desktop_path(filename)
+        if not path:
+            return jsonify({'success': False, 'error': 'Path is required'}), 400
+
+        normalized = normalize_desktop_path(path)
+        file_obj = get_file_by_path(normalized)
+        if file_obj:
+            success = simulator.filesystem.write_file(relative_file_key(normalized), content)
+            if not success:
+                return jsonify({'success': False, 'error': 'Write failed'}), 500
+            file_obj = get_file_by_path(normalized)
+        else:
+            file_obj = create_virtual_file(normalized, content=content, owner='student')
+            if not file_obj:
+                return jsonify({'success': False, 'error': 'Create failed'}), 400
+        entry = serialize_file_entry(file_obj)
+        log_event('file_saved', {'path': entry['path'], 'size': len(content)})
+        return jsonify({'success': True, 'message': 'File saved', 'entry': entry})
+    except Exception as e:
+        log_event('file_save_error', {'error': str(e)})
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+
+@app.route('/api/fs/rename', methods=['POST'])
+def fs_rename():
+    """Rename a file or folder."""
+    try:
+        data = request.get_json() or {}
+        success, message = rename_virtual_path(data.get('path'), data.get('new_name'))
+        status = 200 if success else 400
+        log_event('item_renamed' if success else 'item_rename_failed', {
+            'path': data.get('path'),
+            'new_name': data.get('new_name'),
+            'message': message
+        })
+        return jsonify({'success': success, 'message': message}), status
+    except Exception as e:
+        log_event('rename_error', {'error': str(e)})
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+
+@app.route('/api/fs/delete', methods=['POST'])
+def fs_delete():
+    """Delete a file or folder."""
+    try:
+        data = request.get_json() or {}
+        success, message = delete_virtual_path(data.get('path'))
+        status = 200 if success else 400
+        log_event('item_deleted' if success else 'item_delete_failed', {
+            'path': data.get('path'),
+            'message': message
+        })
+        return jsonify({'success': success, 'message': message}), status
+    except Exception as e:
+        log_event('delete_error', {'error': str(e)})
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+
+@app.route('/api/fs/move', methods=['POST'])
+def fs_move():
+    """Move a file or folder into a virtual folder."""
+    try:
+        data = request.get_json() or {}
+        success, message = move_virtual_path(data.get('source_path'), data.get('destination_folder'))
+        status = 200 if success else 400
+        log_event('item_moved' if success else 'item_move_failed', {
+            'source': data.get('source_path'),
+            'destination': data.get('destination_folder'),
+            'message': message
+        })
+        return jsonify({'success': success, 'message': message}), status
+    except Exception as e:
+        log_event('move_error', {'error': str(e)})
+        return jsonify({'success': False, 'error': str(e)}), 400
 
 
 @app.route('/api/create-file', methods=['POST'])
 def create_file():
     """Create a file"""
     try:
-        data = request.get_json()
+        data = request.get_json() or {}
         filename = data.get('filename', 'new_file.txt')
         content = data.get('content', '')
-        result = simulator.create_file(filename, content)
-        return jsonify(result)
+        path = data.get('path') or normalize_desktop_path(filename)
+        
+        if not filename or not filename.strip():
+            return jsonify({'success': False, 'error': 'Filename cannot be empty'}), 400
+        
+        file_obj = create_virtual_file(path, content=content, owner='student')
+        
+        if file_obj:
+            entry = serialize_file_entry(file_obj)
+            log_event('file_created', {'filename': filename, 'path': entry['path'], 'size': len(content)})
+            return jsonify({
+                'success': True,
+                'message': f'File created: {filename}',
+                'file': file_obj.to_dict(),
+                'entry': entry
+            })
+        else:
+            log_event('file_creation_failed', {'filename': filename, 'reason': 'file_exists_or_limit_reached'})
+            return jsonify({'success': False, 'error': 'Failed to create file - file may already exist or file limit reached'}), 400
     except Exception as e:
+        log_event('file_creation_error', {'error': str(e)})
         return jsonify({'success': False, 'error': str(e)}), 400
 
 
@@ -1242,11 +2028,27 @@ def create_file():
 def delete_file():
     """Delete a file"""
     try:
-        data = request.get_json()
+        data = request.get_json() or {}
         filename = data.get('filename')
-        result = simulator.delete_file(filename)
-        return jsonify(result)
+        path = data.get('path') or filename
+        
+        if not path:
+            return jsonify({'success': False, 'error': 'Filename is required'}), 400
+        
+        success, message = delete_virtual_path(path)
+        
+        if success:
+            log_event('file_deleted', {'filename': filename, 'path': normalize_desktop_path(path)})
+            return jsonify({
+                'success': True,
+                'message': message,
+                'filename': filename
+            })
+        else:
+            log_event('file_deletion_failed', {'filename': filename, 'reason': 'not_found'})
+            return jsonify({'success': False, 'error': f'File not found: {filename}'}), 404
     except Exception as e:
+        log_event('file_deletion_error', {'error': str(e)})
         return jsonify({'success': False, 'error': str(e)}), 400
 
 
@@ -1254,34 +2056,73 @@ def delete_file():
 def read_file():
     """Read file content"""
     try:
-        data = request.get_json()
+        data = request.get_json() or {}
         filename = data.get('filename')
-        result = simulator.read_file(filename)
-        return jsonify(result)
+        path = data.get('path') or filename
+        if not path:
+            return jsonify({'success': False, 'content': None, 'error': 'Filename is required'}), 400
+        
+        file_obj = get_file_by_path(path)
+        if file_obj:
+            content = file_obj.read()
+            entry = serialize_file_entry(file_obj)
+            log_event('file_read', {'filename': filename, 'path': entry['path'], 'size': len(content)})
+            return jsonify({'success': True, 'content': content, 'entry': entry})
+        else:
+            log_event('file_read_failed', {'filename': filename, 'reason': 'not_found'})
+            return jsonify({'success': False, 'content': None, 'error': 'File not found'}), 404
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 400
+        log_event('file_read_error', {'error': str(e)})
+        return jsonify({'success': False, 'content': None, 'error': str(e)}), 400
 
 
 @app.route('/api/write-file', methods=['POST'])
 def write_file():
     """Create or update a file's content."""
     try:
-        data = request.get_json()
+        data = request.get_json() or {}
         filename = data.get('filename')
+        path = data.get('path') or filename
         content = data.get('content', '')
 
-        if not filename:
+        if not path:
             return jsonify({'success': False, 'message': 'Filename is required'}), 400
 
-        if simulator.filesystem.file_exists(filename):
-            success = simulator.filesystem.write_file(filename, content)
-            result = {'success': success, 'filename': filename, 'message': 'File saved'}
+        normalized = normalize_desktop_path(path)
+        file_obj = get_file_by_path(normalized)
+        if file_obj:
+            success = simulator.filesystem.write_file(relative_file_key(normalized), content)
+            if success:
+                file_obj = get_file_by_path(normalized)
+                entry = serialize_file_entry(file_obj)
+                log_event('file_saved', {'filename': filename, 'path': entry['path'], 'size': len(content)})
+                return jsonify({
+                    'success': True,
+                    'filename': filename or entry['name'],
+                    'message': 'File saved successfully',
+                    'size': len(content),
+                    'entry': entry
+                })
+            else:
+                log_event('file_save_failed', {'filename': filename, 'reason': 'write_error'})
+                return jsonify({'success': False, 'error': 'Failed to write file'}), 500
         else:
-            result = simulator.create_file(filename, content)
-            result['message'] = 'File created'
+            file_obj = create_virtual_file(normalized, content=content, owner='student')
+            if file_obj:
+                entry = serialize_file_entry(file_obj)
+                log_event('file_created', {'filename': filename, 'path': entry['path'], 'size': len(content)})
+                return jsonify({
+                    'success': True,
+                    'filename': filename or entry['name'],
+                    'message': 'File created successfully',
+                    'size': len(content),
+                    'file': file_obj.to_dict(),
+                    'entry': entry
+                })
+            else:
+                log_event('file_creation_failed', {'filename': filename})
+                return jsonify({'success': False, 'error': 'Failed to create file'}), 400
 
-        log_event('file_saved', {'filename': filename, 'size': len(content)})
-        return jsonify(result)
     except Exception as e:
         log_event('file_save_error', {'error': str(e)})
         return jsonify({'success': False, 'error': str(e)}), 400
@@ -1295,13 +2136,17 @@ def write_file():
 def system_settings():
     """Get or update system settings"""
     if request.method == 'POST':
-        # Update settings
-        return jsonify({'success': True, 'message': 'Settings updated'})
+        data = request.get_json() or {}
+        for key in ['theme', 'wallpaper', 'accent']:
+            if key in data:
+                system_preferences[key] = data[key]
+        log_event('settings_updated', system_preferences.copy())
+        return jsonify({'success': True, 'message': 'Settings updated', 'settings': system_preferences})
     else:
         # Get settings
         return jsonify({
             'settings': {
-                'theme': 'dark',
+                **system_preferences,
                 'resolution': '1920x1080',
                 'hostname': HOSTNAME,
                 'os_name': SYSTEM_NAME,
