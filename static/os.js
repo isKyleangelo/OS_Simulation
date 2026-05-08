@@ -119,6 +119,171 @@
         return [...state.windows.values()].find(win => win.dataset.appId === appId) || null;
     }
 
+    function emitPrintChange(detail = {}) {
+        document.dispatchEvent(new CustomEvent('os:print-change', { detail }));
+    }
+
+    function hasActivePrintJobs(data) {
+        return (data?.jobs || []).some(job => ['Waiting', 'Printing', 'Error'].includes(job.status));
+    }
+
+    function buildPrinterCard(printer) {
+        return `
+            <div class="card">
+                <h3>${esc(printer.name)}</h3>
+                <p class="muted">${esc(printer.driver)} - ${esc(printer.location)}</p>
+                <p><span class="status-pill ${statusClass(printer.status)}" data-role="printer-status-${attr(printer.id)}">${esc(printer.status)}</span></p>
+                <button class="btn" data-printer-toggle="${attr(printer.id)}" data-next-status="${printer.status === 'Offline' ? 'Online' : 'Offline'}">
+                    Set ${printer.status === 'Offline' ? 'online' : 'offline'}
+                </button>
+            </div>`;
+    }
+
+    function buildPrinterRows(jobs = []) {
+        return jobs.map(job => `
+            <tr data-job-id="${attr(job.id)}">
+                <td><b>#${job.id}</b><br><span class="muted">${esc(job.document_name)}</span></td>
+                <td>${esc(job.printer_name)}</td>
+                <td><span class="status-pill ${statusClass(job.status)}">${esc(job.status)}</span></td>
+                <td>
+                    <div class="progress ${job.status === 'Printing' ? 'is-printing' : ''}">
+                        <div style="width:${Math.max(0, Math.min(100, Number(job.progress || 0)))}%"></div>
+                    </div>
+                </td>
+                <td>${job.pages} page(s), ${job.copies} copy</td>
+                <td>
+                    ${job.status === 'Error' ? `<button class="btn" data-retry-job="${job.id}">Retry</button>` : ''}
+                    ${['Waiting', 'Printing', 'Error'].includes(job.status) ? `<button class="btn danger" data-cancel-job="${job.id}">Cancel</button>` : ''}
+                </td>
+            </tr>`).join('');
+    }
+
+    function buildPrinterHistory(history = []) {
+        return history.slice(0, 8).map(item => `
+            <p><b>${esc(item.event)}</b> #${item.job_id} ${esc(item.document_name)}<br><span class="muted">${esc(item.message)} - ${new Date(item.timestamp).toLocaleTimeString()}</span></p>
+        `).join('');
+    }
+
+    async function refreshPrinterManagerView(win, snapshot = null) {
+        if (!document.body.contains(win)) return;
+        const data = snapshot || await api(`${API}/print-system`);
+        state.printState = data;
+        const pending = (data.jobs || []).filter(job => job.status === 'Waiting').length;
+        const printing = (data.jobs || []).filter(job => job.status === 'Printing').length;
+        const completed = (data.jobs || []).filter(job => job.status === 'Completed').length;
+
+        const pendingNode = $('[data-role="printer-pending"]', win);
+        const printingNode = $('[data-role="printer-printing"]', win);
+        const completedNode = $('[data-role="printer-completed"]', win);
+        const printersHost = $('[data-role="printer-printers"]', win);
+        const rowsHost = $('[data-role="printer-table-body"]', win);
+        const historyHost = $('[data-role="printer-history"]', win);
+
+        if (pendingNode) pendingNode.textContent = String(pending);
+        if (printingNode) printingNode.textContent = String(printing);
+        if (completedNode) completedNode.textContent = String(completed);
+        if (printersHost) printersHost.innerHTML = (data.printers || []).map(buildPrinterCard).join('');
+        if (rowsHost) rowsHost.innerHTML = buildPrinterRows(data.jobs || []);
+        if (historyHost) historyHost.innerHTML = buildPrinterHistory(data.history || []);
+        win.dataset.printActive = hasActivePrintJobs(data) ? 'true' : 'false';
+        if (!hasActivePrintJobs(data)) {
+            stopPrinterSync(win);
+        }
+    }
+
+    function startPrinterSync(win) {
+        if (win._printerSyncTimer || win.classList.contains('is-minimized')) return;
+        const tick = async () => {
+            if (!document.body.contains(win)) {
+                stopPrinterSync(win);
+                return;
+            }
+            if (win.classList.contains('is-minimized')) return;
+            try {
+                const data = await api(`${API}/print-system`);
+                await refreshPrinterManagerView(win, data);
+                if (!hasActivePrintJobs(data)) {
+                    stopPrinterSync(win);
+                }
+            } catch (error) {
+                console.warn('[printer] sync failed', error);
+            }
+        };
+        win._printerSyncTimer = setInterval(tick, 650);
+        tick();
+    }
+
+    function stopPrinterSync(win) {
+        if (win._printerSyncTimer) {
+            clearInterval(win._printerSyncTimer);
+            win._printerSyncTimer = null;
+        }
+    }
+
+    function emitProcessChange(detail = {}) {
+        document.dispatchEvent(new CustomEvent('os:process-change', { detail }));
+    }
+
+    function isNearBottom(element, threshold = 48) {
+        return element.scrollHeight - element.scrollTop - element.clientHeight <= threshold;
+    }
+
+    function updateTerminalScroll(win, stickToBottom) {
+        const output = $('[data-role="terminal-output"]', win);
+        if (!output) return;
+        if (stickToBottom) {
+            requestAnimationFrame(() => {
+                output.scrollTo({ top: output.scrollHeight, behavior: 'smooth' });
+            });
+        }
+    }
+
+    function appendTerminalOutput(win, text, replace = false) {
+        const output = $('[data-role="terminal-output"]', win);
+        const shouldStick = output ? isNearBottom(output) : true;
+        if (replace) {
+            state.terminalOutput = text;
+        } else {
+            state.terminalOutput += text;
+        }
+        if (output) {
+            output.textContent = state.terminalOutput;
+        }
+        updateTerminalScroll(win, shouldStick);
+        const input = $('input[name="command"]', win);
+        input?.focus({ preventScroll: true });
+    }
+
+    async function refreshTaskManagerView(win, snapshot = null) {
+        if (!document.body.contains(win) || win.classList.contains('is-minimized')) return;
+        const tm = snapshot || await api(`${API}/task-manager`);
+        const tasks = sortTasks((tm.tasks || []).filter(task => matchesTaskSearch(task, state.taskSearch)), state.taskSort);
+        const tbody = $('[data-role="task-table-body"]', win);
+        const runningApps = $('[data-role="task-running-apps"]', win);
+        const cpuStat = $('[data-role="task-cpu"]', win);
+        const memStat = $('[data-role="task-memory"]', win);
+        const appCount = tm.statistics?.running_apps || 0;
+        const cpuUtil = Math.round(tm.statistics?.cpu_utilization || 0);
+        const memUtil = Math.round(tm.statistics?.memory_utilization || 0);
+        if (runningApps) runningApps.textContent = appCount;
+        if (cpuStat) cpuStat.textContent = `${cpuUtil}%`;
+        if (memStat) memStat.textContent = `${memUtil}%`;
+        if (tbody) {
+            tbody.innerHTML = tasks.map(task => `
+                <tr class="${task.pid && Number(task.pid) === state.activePid ? 'is-active' : ''}">
+                    <td><b>${esc(task.name)}</b><br><span class="muted">${esc(task.type)} ${task.app_id ? `- ${esc(task.app_id)}` : ''}</span></td>
+                    <td>${task.pid || '-'}</td>
+                    <td><span class="status-pill">${esc(displayTaskState(task.state))}</span></td>
+                    <td class="muted">${task.opened_at ? new Date(task.opened_at).toLocaleTimeString() : '-'}</td>
+                    <td><span class="status-pill ${task.window_state === 'open' ? 'good' : task.window_state === 'hidden' ? 'warn' : 'danger'}">${esc(task.window_state || 'unknown')}</span></td>
+                    <td>${Math.round(task.cpu_usage || 0)}%</td>
+                    <td>${task.memory} MB</td>
+                    <td>${task.can_end ? `<button class="btn danger" data-end-pid="${task.pid || 0}" data-end-app="${attr(task.app_id || '')}">End</button>` : ''}</td>
+                </tr>
+            `).join('') || '<tr><td colspan="8" class="muted">No tasks.</td></tr>';
+        }
+    }
+
     function esc(value) {
         return String(value ?? '').replace(/[&<>"']/g, ch => ({
             '&': '&amp;',
@@ -198,6 +363,9 @@
         if (launchResult?.process?.pid) {
             win.dataset.pid = String(launchResult.process.pid);
             win.dataset.appId = backendApps[type];
+        }
+        if (launchResult?.success) {
+            emitProcessChange({ type: 'launch', appId: backendApps[type] || type, pid: launchResult.process?.pid || null });
         }
         await renderWindow(win, payload);
         focusWindow(win);
@@ -299,12 +467,18 @@
         win.classList.remove('is-minimized');
         win.classList.add('is-active');
         state.activePid = Number(win.dataset.pid || 0) || null;
+        if (win.dataset.type === 'printer' && hasActivePrintJobs(state.printState)) {
+            startPrinterSync(win);
+        }
         win.style.zIndex = ++state.z;
         console.debug('[window] focus', win.dataset.type, win.dataset.id);
         renderTaskbar();
     }
 
     function minimizeWindow(win) {
+        if (win.dataset.type === 'printer') {
+            stopPrinterSync(win);
+        }
         win.classList.add('is-minimized');
         win.classList.remove('is-active');
         renderTaskbar();
@@ -329,6 +503,17 @@
             clearInterval(state.taskTimer);
             state.taskTimer = null;
         }
+        if (type === 'printer') {
+            stopPrinterSync(win);
+            if (win._printChangeHandler) {
+                document.removeEventListener('os:print-change', win._printChangeHandler);
+                win._printChangeHandler = null;
+            }
+        }
+        if (type === 'taskmanager' && win._processChangeHandler) {
+            document.removeEventListener('os:process-change', win._processChangeHandler);
+            win._processChangeHandler = null;
+        }
         if (backendApps[type] && !options.skipBackend) {
             api(`${API}/close-app`, 'POST', { app_id: backendApps[type] }).catch(() => {});
         }
@@ -340,6 +525,7 @@
         if (state.activePid && Number(win.dataset.pid || 0) === state.activePid) {
             state.activePid = null;
         }
+        emitProcessChange({ type: 'close', appId: backendApps[type] || type, pid: Number(win.dataset.pid || 0) || null });
         renderTaskbar();
     }
 
@@ -865,10 +1051,22 @@
                 payload.document_name = documentName;
                 payload.content = text;
                 payload.source_app = sourceApp;
-                await api(`${API}/print-jobs`, 'POST', payload);
+                const result = await api(`${API}/print-jobs`, 'POST', payload);
                 hideModal();
                 toast('Print job submitted', documentName);
-                await openApp('printer', {}, { singleton: true });
+                emitPrintChange({
+                    type: 'submitted',
+                    job: result.job,
+                    snapshot: result.print_system
+                });
+                const printerWin = state.windows.get('printer');
+                if (printerWin) {
+                    await refreshPrinterManagerView(printerWin, result.print_system);
+                    focusWindow(printerWin);
+                    startPrinterSync(printerWin);
+                } else {
+                    await openApp('printer', { printSystem: result.print_system }, { singleton: true });
+                }
             });
         });
     }
@@ -1060,21 +1258,15 @@
         return `${m}:${s}`;
     }
 
-    async function renderPrinterManager() {
-        const data = await api(`${API}/print-system`);
+    async function renderPrinterManager(win, payload = {}) {
+        const data = payload.printSystem || payload.print_system || await api(`${API}/print-system`);
         state.printState = data;
-        const rows = data.jobs.map(job => `
-            <tr>
-                <td><b>#${job.id}</b><br><span class="muted">${esc(job.document_name)}</span></td>
-                <td>${esc(job.printer_name)}</td>
-                <td><span class="status-pill ${statusClass(job.status)}">${esc(job.status)}</span></td>
-                <td><div class="progress"><div style="width:${job.progress}%"></div></div></td>
-                <td>${job.pages} page(s), ${job.copies} copy</td>
-                <td>
-                    ${job.status === 'Error' ? `<button class="btn" data-retry-job="${job.id}">Retry</button>` : ''}
-                    ${['Waiting', 'Printing', 'Error'].includes(job.status) ? `<button class="btn danger" data-cancel-job="${job.id}">Cancel</button>` : ''}
-                </td>
-            </tr>`).join('');
+        const rows = buildPrinterRows(data.jobs || []);
+        const printerCards = (data.printers || []).map(buildPrinterCard).join('');
+        const history = buildPrinterHistory(data.history || []);
+        const pending = (data.jobs || []).filter(job => job.status === 'Waiting').length;
+        const printing = (data.jobs || []).filter(job => job.status === 'Printing').length;
+        const completed = (data.jobs || []).filter(job => job.status === 'Completed').length;
         return `
             <div class="app-surface">
                 <div class="toolbar">
@@ -1082,28 +1274,22 @@
                     <button class="btn primary" data-action="install">${icon('plus')}Install printer</button>
                 </div>
                 <div class="content grid">
-                    <div class="grid two">
-                        ${data.printers.map(printer => `
-                            <div class="card">
-                                <h3>${esc(printer.name)}</h3>
-                                <p class="muted">${esc(printer.driver)} - ${esc(printer.location)}</p>
-                                <p><span class="status-pill ${statusClass(printer.status)}">${esc(printer.status)}</span></p>
-                                <button class="btn" data-printer-toggle="${attr(printer.id)}" data-next-status="${printer.status === 'Offline' ? 'Online' : 'Offline'}">
-                                    Set ${printer.status === 'Offline' ? 'online' : 'offline'}
-                                </button>
-                            </div>
-                        `).join('')}
+                    <div class="grid three">
+                        <div class="card"><h3>Waiting</h3><div class="metric"><span data-role="printer-pending">${pending}</span></div><div class="muted">Queued jobs</div></div>
+                        <div class="card"><h3>Printing</h3><div class="metric"><span data-role="printer-printing">${printing}</span></div><div class="muted">Jobs in progress</div></div>
+                        <div class="card"><h3>Completed</h3><div class="metric"><span data-role="printer-completed">${completed}</span></div><div class="muted">Finished jobs</div></div>
                     </div>
+                    <div class="grid two" data-role="printer-printers">${printerCards}</div>
                     <div class="card">
                         <h3>Queue</h3>
                         <table class="table">
                             <thead><tr><th>Document</th><th>Printer</th><th>Status</th><th>Progress</th><th>Settings</th><th>Actions</th></tr></thead>
-                            <tbody>${rows || '<tr><td colspan="6" class="muted">No print jobs yet.</td></tr>'}</tbody>
+                            <tbody data-role="printer-table-body">${rows || '<tr><td colspan="6" class="muted">No print jobs yet.</td></tr>'}</tbody>
                         </table>
                     </div>
                     <div class="card">
                         <h3>History</h3>
-                        ${(data.history || []).slice(0, 8).map(item => `<p><b>${esc(item.event)}</b> #${item.job_id} ${esc(item.document_name)}<br><span class="muted">${esc(item.message)} - ${new Date(item.timestamp).toLocaleTimeString()}</span></p>`).join('') || '<p class="muted">No print history yet.</p>'}
+                        <div data-role="printer-history">${history || '<p class="muted">No print history yet.</p>'}</div>
                     </div>
                 </div>
             </div>`;
@@ -1151,28 +1337,51 @@
     }
 
     function bindPrinterManager(win) {
+        if (win.dataset.printerManagerBound === 'true') return;
+        win.dataset.printerManagerBound = 'true';
         const body = win.querySelector('.window-body');
+        const syncFromState = () => {
+            if (state.printState) refreshPrinterManagerView(win, state.printState).catch(() => {});
+        };
+        win._printChangeHandler = event => {
+            const snapshot = event.detail?.snapshot || event.detail?.print_system || null;
+            if (!document.body.contains(win) || win.classList.contains('is-minimized')) return;
+            if (snapshot) {
+                refreshPrinterManagerView(win, snapshot).catch(() => {});
+            } else {
+                refreshPrinterManagerView(win).catch(() => {});
+            }
+            if (hasActivePrintJobs(snapshot || state.printState)) {
+                startPrinterSync(win);
+            }
+        };
+        document.addEventListener('os:print-change', win._printChangeHandler);
+        syncFromState();
+        if (hasActivePrintJobs(state.printState)) startPrinterSync(win);
         body.addEventListener('click', async event => {
             const cancel = event.target.closest('[data-cancel-job]');
             const retry = event.target.closest('[data-retry-job]');
             const toggle = event.target.closest('[data-printer-toggle]');
             const action = event.target.closest('[data-action]')?.dataset.action;
             if (cancel) {
-                await api(`${API}/print-jobs/${cancel.dataset.cancelJob}/cancel`, 'POST', {});
+                const result = await api(`${API}/print-jobs/${cancel.dataset.cancelJob}/cancel`, 'POST', {});
                 toast('Print job cancelled');
-                renderWindow(win);
+                emitPrintChange({ type: 'cancelled', job: result.job, snapshot: state.printState });
+                await refreshPrinterManagerView(win).catch(() => {});
             }
             if (retry) {
-                await api(`${API}/print-jobs/${retry.dataset.retryJob}/retry`, 'POST', {});
+                const result = await api(`${API}/print-jobs/${retry.dataset.retryJob}/retry`, 'POST', {});
                 toast('Print job retried');
-                renderWindow(win);
+                emitPrintChange({ type: 'retry', job: result.job, snapshot: state.printState });
+                await refreshPrinterManagerView(win).catch(() => {});
             }
             if (toggle) {
-                await api(`${API}/printers/${toggle.dataset.printerToggle}/status`, 'POST', { status: toggle.dataset.nextStatus });
+                const result = await api(`${API}/printers/${toggle.dataset.printerToggle}/status`, 'POST', { status: toggle.dataset.nextStatus });
                 toast('Printer status updated');
-                renderWindow(win);
+                emitPrintChange({ type: 'printer-status', printer: result.printer, snapshot: state.printState });
+                await refreshPrinterManagerView(win).catch(() => {});
             }
-            if (action === 'refresh') renderWindow(win);
+            if (action === 'refresh') await refreshPrinterManagerView(win).catch(() => {});
             if (action === 'install') openInstallPrinterDialog(win);
         });
     }
@@ -1191,19 +1400,19 @@
         `, modal => {
             $('#installPrinterForm', modal).addEventListener('submit', async event => {
                 event.preventDefault();
-                await api(`${API}/printers/install`, 'POST', Object.fromEntries(new FormData(event.currentTarget).entries()));
+                const result = await api(`${API}/printers/install`, 'POST', Object.fromEntries(new FormData(event.currentTarget).entries()));
                 hideModal();
                 toast('Printer installed');
-                renderWindow(win);
+                emitPrintChange({ type: 'printer-installed', printer: result.printer, snapshot: state.printState });
+                await refreshPrinterManagerView(win).catch(() => {});
             });
         });
     }
 
     async function renderTaskManager() {
-        const [tm, algorithms, appsData] = await Promise.all([
+        const [tm, algorithms] = await Promise.all([
             api(`${API}/task-manager`),
             api(`${API}/scheduling-algorithms`),
-            api(`${API}/applications`)
         ]);
         const tasks = sortTasks((tm.tasks || []).filter(task => matchesTaskSearch(task, state.taskSearch)), state.taskSort);
         const launchableApps = getLaunchableApps();
@@ -1226,14 +1435,14 @@
                 </div>
                 <div class="content grid">
                     <div class="grid three">
-                        ${metricCard('Apps', tm.statistics.running_apps || 0, 'Open application processes')}
-                        ${metricCard('CPU', `${Math.round(tm.statistics.cpu_utilization || 0)}%`, 'Scheduler load')}
-                        ${metricCard('Memory', `${Math.round(tm.statistics.memory_utilization || 0)}%`, `${tm.statistics.memory_used}/${tm.statistics.memory_total} MB`)}
+                        <div class="card"><h3>Apps</h3><div class="metric"><span data-role="task-running-apps">${tm.statistics.running_apps || 0}</span></div><div class="muted">Open application processes</div></div>
+                        <div class="card"><h3>CPU</h3><div class="metric"><span data-role="task-cpu">${Math.round(tm.statistics.cpu_utilization || 0)}%</span></div><div class="muted">Scheduler load</div></div>
+                        <div class="card"><h3>Memory</h3><div class="metric"><span data-role="task-memory">${Math.round(tm.statistics.memory_utilization || 0)}%</span></div><div class="muted">${tm.statistics.memory_used}/${tm.statistics.memory_total} MB</div></div>
                     </div>
                     <div class="card">
                         <table class="table">
                             <thead><tr><th>Name</th><th>PID</th><th>State</th><th>Opened</th><th>Window</th><th>CPU</th><th>Memory</th><th>Action</th></tr></thead>
-                            <tbody>${tasks.map(task => `
+                            <tbody data-role="task-table-body">${tasks.map(task => `
                                 <tr class="${task.pid && Number(task.pid) === state.activePid ? 'is-active' : ''}">
                                     <td><b>${esc(task.name)}</b><br><span class="muted">${esc(task.type)} ${task.app_id ? `- ${esc(task.app_id)}` : ''}</span></td>
                                     <td>${task.pid || '-'}</td>
@@ -1255,15 +1464,11 @@
         if (win.dataset.taskManagerBound === 'true') return;
         win.dataset.taskManagerBound = 'true';
         const body = win.querySelector('.window-body');
-        if (state.taskTimer) clearInterval(state.taskTimer);
-        state.taskTimer = setInterval(() => {
-            if (!document.body.contains(win)) {
-                clearInterval(state.taskTimer);
-                state.taskTimer = null;
-                return;
-            }
-            if (!win.classList.contains('is-minimized')) renderWindow(win).catch(() => {});
-        }, 2000);
+        win._processChangeHandler = () => {
+            if (!document.body.contains(win) || win.classList.contains('is-minimized')) return;
+            refreshTaskManagerView(win).catch(() => {});
+        };
+        document.addEventListener('os:process-change', win._processChangeHandler);
         body.addEventListener('click', async event => {
             const action = event.target.closest('[data-action]')?.dataset.action;
             const end = event.target.closest('[data-end-pid]');
@@ -1272,10 +1477,11 @@
                 if (backendToDesktop[appId]) {
                     await openApp(backendToDesktop[appId], {}, { singleton: apps[backendToDesktop[appId]]?.singleton });
                 } else {
-                    await api(`${API}/launch-app`, 'POST', { app_id: appId }).catch(() => null);
+                    const result = await api(`${API}/launch-app`, 'POST', { app_id: appId }).catch(() => null);
+                    if (result?.success) emitProcessChange({ type: 'launch', appId, pid: result.process?.pid || null });
                 }
                 toast('Application launched', appId);
-                renderWindow(win);
+                refreshTaskManagerView(win).catch(() => {});
             }
             if (action === 'process') {
                 await api(`${API}/create-process`, 'POST', {
@@ -1285,17 +1491,19 @@
                     io_ops: 1,
                     priority: 1
                 });
+                emitProcessChange({ type: 'create-process' });
                 toast('Process created');
-                renderWindow(win);
+                refreshTaskManagerView(win).catch(() => {});
             }
             if (action === 'step') {
                 await api(`${API}/step`, 'POST', {});
-                renderWindow(win);
+                emitProcessChange({ type: 'step' });
+                refreshTaskManagerView(win).catch(() => {});
             }
             if (action === 'task-sort') {
                 state.taskSort = $('[data-action="task-sort"]', body).value;
                 localStorage.setItem('pusoy_task_sort', state.taskSort);
-                renderWindow(win);
+                await renderWindow(win);
             }
             if (end) {
                 await api(`${API}/task-action`, 'POST', {
@@ -1306,7 +1514,7 @@
                 closeTaskProcess(Number(end.dataset.endPid), end.dataset.endApp || null);
                 console.debug('[task-manager] end task', end.dataset.endPid, end.dataset.endApp || 'process');
                 toast('Task ended');
-                renderWindow(win);
+                refreshTaskManagerView(win).catch(() => {});
             }
         });
         body.addEventListener('change', async event => {
@@ -1330,7 +1538,7 @@
     async function renderTerminal() {
         return `
             <div class="terminal">
-                <div class="terminal-output">${esc(state.terminalOutput)}</div>
+                <div class="terminal-output" data-role="terminal-output">${esc(state.terminalOutput)}</div>
                 <form class="terminal-form">
                     <span>user@pusoy&gt;</span>
                     <input name="command" autocomplete="off" autofocus>
@@ -1342,18 +1550,21 @@
     function bindTerminal(win) {
         const form = $('.terminal-form', win);
         const input = $('input[name="command"]', form);
-        input.focus();
+        input.focus({ preventScroll: true });
+        updateTerminalScroll(win, true);
         form.addEventListener('submit', async event => {
             event.preventDefault();
             const command = input.value.trim();
             if (!command) return;
             if (command === 'clear') {
-                state.terminalOutput = '';
+                appendTerminalOutput(win, '', true);
             } else {
                 const result = await api(`${API}/terminal-command`, 'POST', { command });
-                state.terminalOutput += `user@pusoy> ${command}\n${result.output}\n`;
+                appendTerminalOutput(win, `user@pusoy> ${command}\n${result.output}\n`);
+                emitProcessChange({ type: 'terminal-command', command });
             }
-            renderWindow(win);
+            input.value = '';
+            input.focus({ preventScroll: true });
         });
     }
 
@@ -1661,6 +1872,9 @@
                 minimizeAll();
             }
         });
+        document.addEventListener('os:print-change', () => {
+            updateTray().catch(() => {});
+        });
     }
 
     window.OS = {
@@ -1676,7 +1890,6 @@
         await renderStart();
         await updateTray();
         setInterval(updateTray, 2500);
-        setInterval(refreshLiveApps, 2500);
         await openApp('dashboard', {}, { singleton: true });
     }
 

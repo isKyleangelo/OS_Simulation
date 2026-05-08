@@ -905,6 +905,19 @@ body.wallpaper-graphite {
     height: 100%;
     width: 0;
     background: var(--accent);
+    transition: width 180ms linear;
+    will-change: width;
+}
+
+.progress.is-printing > div {
+    background: linear-gradient(90deg, var(--accent) 0%, rgba(255, 255, 255, 0.28) 50%, var(--accent) 100%);
+    background-size: 180% 100%;
+    animation: printer-progress 1.2s linear infinite;
+}
+
+@keyframes printer-progress {
+    from { background-position: 0% 0; }
+    to { background-position: 180% 0; }
 }
 
 .terminal {
@@ -919,9 +932,11 @@ body.wallpaper-graphite {
 .terminal-output {
     padding: 14px;
     overflow: auto;
+    min-height: 0;
     white-space: pre-wrap;
     line-height: 1.45;
     user-select: text;
+    scroll-behavior: smooth;
 }
 
 .terminal-form {
