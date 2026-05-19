@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PusoyOS Desktop Simulator</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='os.css', v=static_asset_version('os.css')) }}">
+</head>
+<body class="wallpaper-aurora">
+    <main id="desktop" class="desktop" aria-label="Desktop"></main>
+    <section id="windowLayer" class="window-layer" aria-live="polite"></section>
+
+    <section id="startMenu" class="panel start-menu" aria-label="Start menu">
+        <div class="start-head">
+            <strong>PusoyOS</strong>
+            <span class="muted">Desktop simulator</span>
+        </div>
+        <div id="startGrid" class="start-grid"></div>
+    </section>
+
+    <section id="quickPanel" class="panel quick-panel" aria-label="Notification area">
+        <div class="grid" id="quickPanelBody"></div>
+    </section>
+
+    <nav id="desktopMenu" class="context-menu" aria-label="Desktop context menu"></nav>
+    <nav id="fileMenu" class="context-menu" aria-label="File context menu"></nav>
+
+    <section id="modalBackdrop" class="modal-backdrop" aria-modal="true" role="dialog">
+        <div class="modal-window">
+            <div class="modal-head">
+                <strong id="modalTitle">Dialog</strong>
+                <button id="modalClose" class="window-control close" type="button" aria-label="Close">x</button>
+            </div>
+            <div id="modalBody" class="modal-body"></div>
+        </div>
+    </section>
+
+    <div id="toastStack" class="toast-stack" aria-live="polite"></div>
+
+    <footer class="taskbar" aria-label="Taskbar">
+        <button id="startButton" class="start-button" type="button" title="Start">OS</button>
+        <input id="globalSearch" class="search-shell" placeholder="Search apps and files" autocomplete="off">
+        <div id="taskbarApps" class="taskbar-apps"></div>
+        <div class="task-spacer"></div>
+        <div class="tray">
+            <span id="trayCpu" class="metric-tray">CPU 0%</span>
+            <span id="trayRam" class="metric-tray">RAM 0%</span>
+            <button id="trayButton" class="taskbar-button" type="button" title="Notifications and clock">
+                <span id="trayPrint">Print 0</span>
+                <span class="tray-card"><strong id="clock">00:00</strong><span id="dateText">Today</span></span>
+            </button>
+        </div>
+    </footer>
+
+    <script src="{{ url_for('static', filename='os.js', v=static_asset_version('os.js')) }}"></script>
+</body>
+</html>

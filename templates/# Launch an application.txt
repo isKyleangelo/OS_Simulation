@@ -1,0 +1,14 @@
+# Launch an application
+POST /api/launch-app
+{"app_id": "vscode"}
+
+# Create a process
+POST /api/create-process
+{"name": "MyApp", "burst_time": 30, "memory": 256}
+
+# Get system info
+GET /api/system-info
+
+# Run simulation
+POST /api/run-simulation
+{"cycles": 100}

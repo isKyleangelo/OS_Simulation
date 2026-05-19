@@ -1,0 +1,1178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PusoyOS - Desktop Operating System Simulator</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Ubuntu', 'Segoe UI', sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            overflow: hidden;
+            height: 100vh;
+            width: 100vw;
+        }
+
+        /* Desktop */
+        #desktop {
+            width: 100%;
+            height: calc(100vh - 50px);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .desktop-icon {
+            position: absolute;
+            width: 80px;
+            text-align: center;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .icon-item {
+            font-size: 40px;
+            margin-bottom: 5px;
+            transition: transform 0.2s;
+        }
+
+        .desktop-icon:hover .icon-item {
+            transform: scale(1.1);
+        }
+
+        .icon-label {
+            font-size: 11px;
+            color: #ddd;
+            word-wrap: break-word;
+            background: rgba(0,0,0,0.4);
+            padding: 4px;
+            border-radius: 3px;
+            overflow: hidden;
+            white-space: normal;
+        }
+
+        .desktop-icon:hover .icon-label {
+            background: rgba(102, 126, 234, 0.7);
+        }
+
+        /* Taskbar */
+        #taskbar {
+            position: fixed;
+            bottom: 0;
+            width: 100%;
+            height: 50px;
+            background: linear-gradient(90deg, #1a1a2e 0%, #16213e 100%);
+            border-top: 1px solid #333;
+            display: flex;
+            align-items: center;
+            padding: 0 10px;
+            z-index: 1000;
+            gap: 5px;
+        }
+
+        .taskbar-item {
+            height: 40px;
+            padding: 0 12px;
+            background: rgba(102, 126, 234, 0.8);
+            border: 1px solid rgba(102, 126, 234, 0.5);
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            cursor: pointer;
+            color: white;
+            font-size: 12px;
+            transition: all 0.2s;
+            max-width: 150px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .taskbar-item:hover {
+            background: rgba(102, 126, 234, 1);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+
+        .taskbar-spacer {
+            flex: 1;
+        }
+
+        .system-tray {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            color: #ddd;
+            font-size: 12px;
+            border-left: 1px solid #333;
+            padding-left: 15px;
+        }
+
+        .tray-item {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        /* Windows */
+        .window {
+            position: absolute;
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 8px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+            display: none;
+            min-width: 400px;
+            min-height: 300px;
+            z-index: 100;
+            overflow: hidden;
+            flex-direction: column;
+        }
+
+        .window.active {
+            display: flex;
+            z-index: 500;
+        }
+
+        .window-header {
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 12px;
+            cursor: move;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-shrink: 0;
+        }
+
+        .window-title {
+            font-weight: 600;
+            font-size: 13px;
+        }
+
+        .window-controls {
+            display: flex;
+            gap: 8px;
+        }
+
+        .window-btn {
+            width: 24px;
+            height: 24px;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+            background: rgba(255,255,255,0.2);
+            color: white;
+            font-size: 12px;
+            transition: background 0.2s;
+        }
+
+        .window-btn:hover {
+            background: rgba(255,255,255,0.4);
+        }
+
+        .window-btn.close:hover {
+            background: #f56565;
+        }
+
+        .window-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 15px;
+            background: white;
+        }
+
+        /* Dialogs */
+        .window.settings-window .window-content,
+        .window.taskmanager-window .window-content {
+            padding: 0;
+        }
+
+        .settings-panel {
+            display: grid;
+            grid-template-columns: 200px 1fr;
+            height: 100%;
+        }
+
+        .settings-menu {
+            background: #f7fafc;
+            border-right: 1px solid #e2e8f0;
+            padding: 0;
+        }
+
+        .settings-menu-item {
+            padding: 12px 15px;
+            cursor: pointer;
+            border-left: 3px solid transparent;
+            transition: all 0.2s;
+            font-size: 13px;
+            color: #333;
+        }
+
+        .settings-menu-item:hover {
+            background: #edf2f7;
+        }
+
+        .settings-menu-item.active {
+            background: #e6f2ff;
+            border-left-color: #667eea;
+            color: #667eea;
+            font-weight: 600;
+        }
+
+        .settings-content {
+            padding: 15px;
+            overflow-y: auto;
+        }
+
+        .settings-section {
+            display: none;
+        }
+
+        .settings-section.active {
+            display: block;
+        }
+
+        .setting-item {
+            margin-bottom: 15px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid #e2e8f0;
+        }
+
+        .setting-item:last-child {
+            border-bottom: none;
+        }
+
+        .setting-label {
+            font-weight: 600;
+            color: #333;
+            font-size: 13px;
+            margin-bottom: 5px;
+        }
+
+        .setting-value {
+            color: #666;
+            font-size: 12px;
+        }
+
+        /* File Manager */
+        .file-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+            gap: 10px;
+            padding: 10px;
+        }
+
+        .file-item {
+            padding: 8px;
+            text-align: center;
+            cursor: pointer;
+            border-radius: 4px;
+            transition: background 0.2s;
+            font-size: 12px;
+        }
+
+        .file-item:hover {
+            background: #edf2f7;
+        }
+
+        .file-icon {
+            font-size: 32px;
+            margin-bottom: 5px;
+        }
+
+        .file-name {
+            word-break: break-word;
+            color: #333;
+        }
+
+        /* Task Manager */
+        .process-list {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+        }
+
+        .process-list thead {
+            background: #f7fafc;
+            border-bottom: 1px solid #e2e8f0;
+        }
+
+        .process-list th {
+            padding: 8px;
+            text-align: left;
+            font-weight: 600;
+            color: #333;
+            border-right: 1px solid #e2e8f0;
+        }
+
+        .process-list td {
+            padding: 8px;
+            border-bottom: 1px solid #e2e8f0;
+            border-right: 1px solid #e2e8f0;
+        }
+
+        .process-list tr:hover {
+            background: #f0f4ff;
+        }
+
+        .process-list tr:last-child td {
+            border-bottom: none;
+        }
+
+        .process-list td:last-child {
+            border-right: none;
+        }
+
+        /* App Launcher */
+        #appLauncher {
+            display: none;
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.6);
+            z-index: 2000;
+        }
+
+        #appLauncher.active {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .app-launcher-window {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            max-width: 600px;
+            width: 90%;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+
+        .app-launcher-title {
+            font-size: 18px;
+            font-weight: 700;
+            margin-bottom: 15px;
+            color: #1a1a2e;
+        }
+
+        .app-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
+            gap: 10px;
+        }
+
+        .app-card {
+            padding: 12px;
+            border: 2px solid #e2e8f0;
+            border-radius: 6px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .app-card:hover {
+            border-color: #667eea;
+            background: #f0f4ff;
+            transform: translateY(-2px);
+        }
+
+        .app-icon {
+            font-size: 36px;
+            margin-bottom: 8px;
+        }
+
+        .app-name {
+            font-weight: 600;
+            color: #333;
+            font-size: 12px;
+            margin-bottom: 4px;
+        }
+
+        .app-status {
+            font-size: 10px;
+            color: #48bb78;
+        }
+
+        .app-status.inactive {
+            color: #999;
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #f1f1f1;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #667eea;
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #764ba2;
+        }
+
+        .alert {
+            padding: 12px;
+            border-radius: 4px;
+            margin-bottom: 10px;
+            font-size: 12px;
+            animation: slideIn 0.3s ease;
+        }
+
+        .alert-success {
+            background: #c6f6d5;
+            color: #22543d;
+            border-left: 3px solid #48bb78;
+        }
+
+        .alert-error {
+            background: #fed7d7;
+            color: #742a2a;
+            border-left: 3px solid #f56565;
+        }
+
+        @keyframes slideIn {
+            from { transform: translateX(-20px); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+
+        /* Button styles */
+        .btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 600;
+            transition: all 0.2s;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-danger {
+            background: #f56565;
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #e53e3e;
+        }
+
+        /* Input styles */
+        input[type="text"],
+        input[type="number"],
+        select {
+            padding: 6px;
+            border: 1px solid #e2e8f0;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+
+        input[type="text"]:focus,
+        input[type="number"]:focus,
+        select:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.1);
+        }
+    </style>
+</head>
+<body>
+    <!-- Desktop -->
+    <div id="desktop"></div>
+
+    <!-- Taskbar -->
+    <div id="taskbar">
+        <div id="appMenuBtn" class="taskbar-item" onclick="toggleAppLauncher()" style="background: linear-gradient(135deg, #48bb78 0%, #38a169 100%);">
+            ▮ ▮ ▮ Menu
+        </div>
+        <div id="taskbarApps"></div>
+        <div class="taskbar-spacer"></div>
+        <div class="system-tray">
+            <div class="tray-item">
+                <span id="systemTime">00:00</span>
+            </div>
+            <div class="tray-item">
+                <span id="cpuUsage">CPU: 0%</span>
+            </div>
+            <div class="tray-item">
+                <span id="memUsage">RAM: 0%</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Application Launcher -->
+    <div id="appLauncher">
+        <div class="app-launcher-window">
+            <div class="app-launcher-title">�️ PusoyOS - Applications</div>
+            <div class="app-grid" id="appGrid"></div>
+        </div>
+    </div>
+
+    <!-- Windows will be dynamically created -->
+
+    <script>
+        const API_BASE = '/api';
+        let windows = {};
+        let windowZIndex = 100;
+        let desktopIcons = {};
+        let draggedWindow = null;
+        let dragOffset = { x: 0, y: 0 };
+
+        // ========== API Calls ==========
+        async function apiCall(endpoint, method = 'GET', data = null) {
+            const options = {
+                method,
+                headers: { 'Content-Type': 'application/json' }
+            };
+            if (data) options.body = JSON.stringify(data);
+            
+            try {
+                const response = await fetch(endpoint, options);
+                return await response.json();
+            } catch (error) {
+                console.error(error);
+                showAlert('Network error', 'error');
+            }
+        }
+
+        // ========== Application Management ==========
+        async function launchApplication(appId) {
+            const result = await apiCall(`${API_BASE}/launch-app`, 'POST', { app_id: appId });
+            if (result.success) {
+                openApplicationWindow(appId);
+                updateTaskbar();
+                showAlert(`${result.message}`, 'success');
+            } else {
+                showAlert(result.message, 'error');
+            }
+        }
+
+        async function closeApplication(appId) {
+            const result = await apiCall(`${API_BASE}/close-app`, 'POST', { app_id: appId });
+            if (result.success) {
+                closeWindow(appId);
+                updateTaskbar();
+            }
+        }
+
+        // ========== Window Management ==========
+        function createWindow(appId, title, icon) {
+            const window = document.createElement('div');
+            window.className = 'window active';
+            window.id = `window-${appId}`;
+            window.style.width = '700px';
+            window.style.height = '500px';
+            window.style.left = Math.random() * 300 + 100 + 'px';
+            window.style.top = Math.random() * 200 + 50 + 'px';
+
+            window.innerHTML = `
+                <div class="window-header">
+                    <div class="window-title">${icon} ${title}</div>
+                    <div class="window-controls">
+                        <button class="window-btn" onclick="minimizeWindow('${appId}')">_</button>
+                        <button class="window-btn close" onclick="closeWindow('${appId}')">✕</button>
+                    </div>
+                </div>
+                <div class="window-content" id="content-${appId}">
+                    <div style="text-align: center; padding: 20px; color: #999;">
+                        Loading ${title}...
+                    </div>
+                </div>
+            `;
+
+            document.body.appendChild(window);
+            windows[appId] = window;
+            
+            // Make window draggable
+            makeWindowDraggable(window, appId);
+            
+            // Load content
+            loadWindowContent(appId);
+        }
+
+        function openApplicationWindow(appId) {
+            if (!windows[appId]) {
+                const apps = {
+                    'firefox': { title: 'Firefox Browser', icon: '🌐' },
+                    'vscode': { title: 'PusoyCode Editor', icon: '💻' },
+                    'filemanager': { title: 'File Manager', icon: '📁' },
+                    'terminal': { title: 'PusoyShell Terminal', icon: '⌨️' },
+                    'settings': { title: 'System Settings', icon: '⚙️' },
+                    'taskmanager': { title: 'Task Manager', icon: '📊' },
+                    'mediaplay': { title: 'Media Player', icon: '🎵' },
+                    'messenger': { title: 'Messenger', icon: '💬' }
+                };
+                
+                if (apps[appId]) {
+                    createWindow(appId, apps[appId].title, apps[appId].icon);
+                }
+            } else {
+                windows[appId].classList.add('active');
+                windows[appId].style.zIndex = ++windowZIndex;
+            }
+        }
+
+        function closeWindow(appId) {
+            if (windows[appId]) {
+                windows[appId].remove();
+                delete windows[appId];
+                closeApplication(appId);
+            }
+        }
+
+        function minimizeWindow(appId) {
+            if (windows[appId]) {
+                windows[appId].classList.remove('active');
+            }
+        }
+
+        function makeWindowDraggable(windowEl, appId) {
+            const header = windowEl.querySelector('.window-header');
+            
+            header.addEventListener('mousedown', (e) => {
+                draggedWindow = windowEl;
+                dragOffset.x = e.clientX - windowEl.offsetLeft;
+                dragOffset.y = e.clientY - windowEl.offsetTop;
+                windowEl.style.zIndex = ++windowZIndex;
+            });
+        }
+
+        document.addEventListener('mousemove', (e) => {
+            if (draggedWindow) {
+                draggedWindow.style.left = (e.clientX - dragOffset.x) + 'px';
+                draggedWindow.style.top = (e.clientY - dragOffset.y) + 'px';
+            }
+        });
+
+        document.addEventListener('mouseup', () => {
+            draggedWindow = null;
+        });
+
+        // ========== Window Content Loading ==========
+        async function loadWindowContent(appId) {
+            const contentDiv = document.getElementById(`content-${appId}`);
+            
+            if (appId === 'taskmanager') {
+                loadTaskManager(contentDiv);
+            } else if (appId === 'settings') {
+                loadSettings(contentDiv);
+            } else if (appId === 'filemanager') {
+                loadFileManager(contentDiv);
+            } else if (appId === 'terminal') {
+                contentDiv.innerHTML = `
+                    <div style="font-family: monospace; color: #0f0; background: #000; padding: 10px; height: 100%; overflow-y: auto; display: flex; flex-direction: column;">
+                        <div id="terminalOutput" style="flex: 1; margin-bottom: 10px; line-height: 1.6;">PusoyShell v2.4.1<br>Type 'help' for commands<br>root@pusoy-workstation:~# </div>
+                        <div style="display: flex; gap: 5px;">
+                            <span style="color: #0f0;">root@pusoy-workstation:~# </span>
+                            <input id="terminalInput" type="text" style="background: #000; color: #0f0; border: none; outline: none; flex: 1; font-family: monospace; font-size: 13px;" placeholder="Type command..." onkeydown="handleTerminalInput(event)">
+                        </div>
+                    </div>
+                `;
+                setTimeout(() => document.getElementById('terminalInput').focus(), 100);
+            } else {
+                contentDiv.innerHTML = `
+                    <h2 style="color: #667eea; margin-bottom: 10px;">🚀 ${appId.toUpperCase()}</h2>
+                    <p style="color: #666; line-height: 1.6;">
+                        This is a simulated application running on PusoyOS v2.4.1.
+                    </p>
+                    <p style="color: #666; line-height: 1.6; margin-top: 10px;">
+                        The application is consuming CPU and memory resources as tracked by the task manager.
+                    </p>
+                    <div style="margin-top: 15px; padding: 10px; background: #f7fafc; border-radius: 4px; border-left: 3px solid #667eea;">
+                        <strong>Process Info:</strong><br>
+                        <small style="color: #666;">
+                            This window represents an actual process running on the simulated OS with realistic resource consumption and scheduling.
+                        </small>
+                    </div>
+                `;
+            }
+        }
+
+        async function loadTaskManager(contentDiv) {
+            contentDiv.style.padding = '0';
+            const sysInfo = await apiCall(`${API_BASE}/system-info`, 'GET');
+            const sys = sysInfo.system;
+            
+            contentDiv.innerHTML = `
+                <div style="padding: 15px; background: #f7fafc; border-bottom: 1px solid #e2e8f0;">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 15px;">
+                        <div style="background: white; padding: 12px; border-radius: 6px; border-left: 4px solid #48bb78;">
+                            <div style="font-size: 12px; color: #666; margin-bottom: 4px;">CPU Usage</div>
+                            <div style="font-size: 24px; font-weight: bold; color: #48bb78;">${Math.round(sys.cpu_utilization)}%</div>
+                        </div>
+                        <div style="background: white; padding: 12px; border-radius: 6px; border-left: 4px solid #3182ce;">
+                            <div style="font-size: 12px; color: #666; margin-bottom: 4px;">RAM Usage</div>
+                            <div style="font-size: 24px; font-weight: bold; color: #3182ce;">${Math.round(sys.memory_percent)}%</div>
+                        </div>
+                    </div>
+                    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;">
+                        <div style="background: white; padding: 10px; border-radius: 4px; text-align: center;">
+                            <div style="font-size: 11px; color: #999;">Processes</div>
+                            <div style="font-size: 16px; font-weight: bold; color: #1a1a2e;">${sys.running_processes}</div>
+                        </div>
+                        <div style="background: white; padding: 10px; border-radius: 4px; text-align: center;">
+                            <div style="font-size: 11px; color: #999;">Memory Used</div>
+                            <div style="font-size: 16px; font-weight: bold; color: #1a1a2e;">${sys.used_memory}MB</div>
+                        </div>
+                        <div style="background: white; padding: 10px; border-radius: 4px; text-align: center;">
+                            <div style="font-size: 11px; color: #999;">Page Faults</div>
+                            <div style="font-size: 16px; font-weight: bold; color: #1a1a2e;">${sys.page_faults}</div>
+                        </div>
+                    </div>
+                </div>
+                <table class="process-list">
+                    <thead>
+                        <tr>
+                            <th>Process Name</th>
+                            <th>PID</th>
+                            <th>State</th>
+                            <th>Memory</th>
+                            <th>Context Switches</th>
+                        </tr>
+                    </thead>
+                    <tbody id="processTable"></tbody>
+                </table>
+            `;
+            updateProcessTable();
+        }
+
+        async function updateProcessTable() {
+            const status = await apiCall(`${API_BASE}/get-status`, 'GET');
+            const tbody = document.getElementById('processTable');
+            
+            if (!tbody) return;
+            
+            let html = '';
+            if (status.processes && status.processes.length > 0) {
+                status.processes.forEach(p => {
+                    const stateColor = {
+                        'RUNNING': '#48bb78',
+                        'READY': '#3182ce',
+                        'WAITING': '#ed8936',
+                        'TERMINATED': '#e53e3e',
+                        'NEW': '#9f7aea'
+                    }[p.state] || '#666';
+                    
+                    html += `
+                        <tr>
+                            <td>${p.name}</td>
+                            <td>${p.pid}</td>
+                            <td><span style="color: ${stateColor}; font-weight: 600;">${p.state}</span></td>
+                            <td>${p.memory_required}MB</td>
+                            <td>${p.context_switches}</td>
+                        </tr>
+                    `;
+                });
+            } else {
+                html = '<tr><td colspan="5" style="text-align: center; color: #999; padding: 20px;">No processes running</td></tr>';
+            }
+            
+            tbody.innerHTML = html;
+        }
+
+        async function loadSettings(contentDiv) {
+            const sysInfo = await apiCall(`${API_BASE}/system-info`, 'GET');
+            const settings = await apiCall(`${API_BASE}/system-settings`, 'GET');
+            const sys = sysInfo.system;
+
+            contentDiv.style.padding = '0';
+            contentDiv.innerHTML = `
+                <div class="settings-panel">
+                    <div class="settings-menu">
+                        <div class="settings-menu-item active" onclick="switchSettings(this, 'general')">General</div>
+                        <div class="settings-menu-item" onclick="switchSettings(this, 'display')">Display</div>
+                        <div class="settings-menu-item" onclick="switchSettings(this, 'about')">About</div>
+                    </div>
+                    <div class="settings-content">
+                        <div id="general" class="settings-section active">
+                            <h3 style="color: #1a1a2e; margin-bottom: 15px;">System Settings</h3>
+                            <div class="setting-item">
+                                <div class="setting-label">Hostname</div>
+                                <div class="setting-value">${sys.hostname}</div>
+                            </div>
+                            <div class="setting-item">
+                                <div class="setting-label">CPU Cores</div>
+                                <div class="setting-value">${sys.cpu_cores}</div>
+                            </div>
+                            <div class="setting-item">
+                                <div class="setting-label">CPU Frequency</div>
+                                <div class="setting-value">${sys.cpu_freq} MHz</div>
+                            </div>
+                            <div class="setting-item">
+                                <div class="setting-label">Total RAM</div>
+                                <div class="setting-value">${sys.total_memory} MB</div>
+                            </div>
+                        </div>
+                        <div id="display" class="settings-section">
+                            <h3 style="color: #1a1a2e; margin-bottom: 15px;">Display Settings</h3>
+                            <div class="setting-item">
+                                <div class="setting-label">Theme</div>
+                                <div class="setting-value">${settings.settings.theme}</div>
+                            </div>
+                            <div class="setting-item">
+                                <div class="setting-label">Resolution</div>
+                                <div class="setting-value">${settings.settings.resolution}</div>
+                            </div>
+                        </div>
+                        <div id="about" class="settings-section">
+                            <h3 style="color: #1a1a2e; margin-bottom: 15px;">About PusoyOS</h3>
+                            <div class="setting-item">
+                                <div class="setting-label">OS Name</div>
+                                <div class="setting-value">${sys.os_name}</div>
+                            </div>
+                            <div class="setting-item">
+                                <div class="setting-label">Version</div>
+                                <div class="setting-value">${sys.os_version}</div>
+                            </div>
+                            <div class="setting-item">
+                                <div class="setting-label">Kernel</div>
+                                <div class="setting-value">${sys.kernel}</div>
+                            </div>
+                            <div class="setting-item">
+                                <div class="setting-label">System Uptime</div>
+                                <div class="setting-value">${sys.uptime} ticks</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function switchSettings(elem, sectionId) {
+            document.querySelectorAll('.settings-menu-item').forEach(e => e.classList.remove('active'));
+            document.querySelectorAll('.settings-section').forEach(e => e.classList.remove('active'));
+            elem.classList.add('active');
+            document.getElementById(sectionId).classList.add('active');
+        }
+
+        async function loadFileManager(contentDiv) {
+            const result = await apiCall(`${API_BASE}/files`, 'GET');
+            let html = `
+                <div style="padding: 15px; background: #f7fafc;">
+                    <div style="margin-bottom: 15px; display: flex; gap: 10px;">
+                        <input id="newFileName" type="text" placeholder="Filename..." style="flex: 1; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                        <button onclick="createNewFile()" style="padding: 8px 15px; background: #48bb78; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 600;">+ Create</button>
+                    </div>
+                    <div class="file-list">
+            `;
+            
+            if (result.files && result.files.length > 0) {
+                result.files.forEach(file => {
+                    html += `
+                        <div class="file-item" style="display: flex; align-items: center; justify-content: space-between; padding: 12px; background: white; border: 1px solid #e2e8f0; border-radius: 4px; margin-bottom: 8px;">
+                            <div style="display: flex; align-items: center; flex: 1; gap: 10px;">
+                                <div style="font-size: 20px;">📄</div>
+                                <div>
+                                    <div class="file-name" style="font-weight: 600; color: #1a1a2e;">${file.filename}</div>
+                                    <div style="font-size: 11px; color: #999;">${file.size} bytes | Modified: ${new Date(file.modified_at).toLocaleDateString()}</div>
+                                </div>
+                            </div>
+                            <button onclick="deleteFile('${file.filename}')" style="padding: 6px 12px; background: #e53e3e; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 600;">Delete</button>
+                        </div>
+                    `;
+                });
+            } else {
+                html += '<div style="padding: 20px; text-align: center; color: #999;">No files</div>';
+            }
+            
+            html += '</div></div>';
+            contentDiv.style.padding = '0';
+            contentDiv.innerHTML = html;
+        }
+
+        async function createNewFile() {
+            const fileName = document.getElementById('newFileName').value.trim();
+            if (!fileName) {
+                alert('Please enter a filename');
+                return;
+            }
+            
+            const result = await apiCall(`${API_BASE}/create-file`, 'POST', {
+                filename: fileName,
+                content: 'New file created'
+            });
+            
+            if (result.success) {
+                document.getElementById('newFileName').value = '';
+                alert(`File '${fileName}' created successfully`);
+                const contentDiv = document.getElementById('content-filemanager');
+                if (contentDiv) {
+                    loadFileManager(contentDiv);
+                }
+            } else {
+                alert('Error creating file: ' + result.message);
+            }
+        }
+
+        async function deleteFile(filename) {
+            if (!confirm(`Are you sure you want to delete '${filename}'?`)) {
+                return;
+            }
+            
+            const result = await apiCall(`${API_BASE}/delete-file`, 'POST', {
+                filename: filename
+            });
+            
+            if (result.success) {
+                alert(`File '${filename}' deleted successfully`);
+                const contentDiv = document.getElementById('content-filemanager');
+                if (contentDiv) {
+                    loadFileManager(contentDiv);
+                }
+            } else {
+                alert('Error deleting file: ' + result.message);
+            }
+        }
+
+        // ========== Taskbar & Desktop ==========
+        async function updateTaskbar() {
+            const apps = await apiCall(`${API_BASE}/applications`, 'GET');
+            const taskbarApps = document.getElementById('taskbarApps');
+            let html = '';
+            
+            apps.running.forEach(app => {
+                html += `
+                    <div class="taskbar-item" onclick="openApplicationWindow('${app.app_id}'); this.style.zIndex=${++windowZIndex};">
+                        📌 ${app.name.substring(0, 15)}
+                    </div>
+                `;
+            });
+            
+            taskbarApps.innerHTML = html;
+        }
+
+        async function loadDesktop() {
+            const apps = await apiCall(`${API_BASE}/applications`, 'GET');
+            const desktop = document.getElementById('desktop');
+            
+            let positions = [
+                { x: 20, y: 20 },
+                { x: 120, y: 20 },
+                { x: 220, y: 20 },
+                { x: 20, y: 120 },
+                { x: 120, y: 120 }
+            ];
+            
+            let idx = 0;
+            apps.available.slice(0, 5).forEach(app => {
+                const pos = positions[idx++];
+                const icon = document.createElement('div');
+                icon.className = 'desktop-icon';
+                icon.style.left = pos.x + 'px';
+                icon.style.top = pos.y + 'px';
+                icon.innerHTML = `
+                    <div class="icon-item">${app.icon}</div>
+                    <div class="icon-label">${app.name}</div>
+                `;
+                icon.addEventListener('dblclick', () => launchApplication(app.app_id));
+                desktop.appendChild(icon);
+            });
+        }
+
+        async function loadAppLauncher() {
+            const apps = await apiCall(`${API_BASE}/applications`, 'GET');
+            const appGrid = document.getElementById('appGrid');
+            let html = '';
+            
+            apps.available.forEach(app => {
+                const status = app.running ? 'running' : 'stopped';
+                html += `
+                    <div class="app-card" onclick="launchApplication('${app.app_id}')">
+                        <div class="app-icon">${app.icon}</div>
+                        <div class="app-name">${app.name}</div>
+                        <div class="app-status ${status}">${status}</div>
+                    </div>
+                `;
+            });
+            
+            // Add power options
+            html += '<div style="grid-column: 1/-1; margin-top: 15px; padding-top: 15px; border-top: 2px solid #e2e8f0; display: flex; gap: 10px; justify-content: flex-end;">';
+            html += '<button onclick="shutdownSystem()" style="padding: 8px 16px; background: #e53e3e; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 600; font-size: 13px;">⏻ Shutdown</button>';
+            html += '<button onclick="restartSystem()" style="padding: 8px 16px; background: #3182ce; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 600; font-size: 13px;">🔄 Restart</button>';
+            html += '</div>';
+            
+            appGrid.innerHTML = html;
+        }
+
+        function toggleAppLauncher() {
+            const launcher = document.getElementById('appLauncher');
+            launcher.classList.toggle('active');
+            if (launcher.classList.contains('active')) {
+                loadAppLauncher();
+            }
+        }
+
+        function shutdownSystem() {
+            if (confirm('Are you sure you want to shutdown PusoyOS?')) {
+                // Close all windows
+                Object.keys(windows).forEach(appId => {
+                    if (windows[appId]) {
+                        windows[appId].remove();
+                        delete windows[appId];
+                    }
+                });
+                windows = {};
+                
+                // Hide launcher
+                const launcher = document.getElementById('appLauncher');
+                launcher.classList.remove('active');
+                
+                // Show shutdown screen
+                const desktop = document.getElementById('desktop');
+                desktop.innerHTML = '<div style="display: flex; align-items: center; justify-content: center; height: 100%; background: #000; color: #0f0; font-size: 28px; font-weight: bold; font-family: monospace; text-align: center;">PusoyOS is shutting down...<br><br><small style="font-size: 14px;">Press F5 to restart the system</small></div>';
+                desktop.style.background = '#000';
+            }
+        }
+
+        function restartSystem() {
+            if (confirm('Are you sure you want to restart PusoyOS?')) {
+                location.reload();
+            }
+        }
+
+        function handleTerminalInput(event) {
+            if (event.key === 'Enter') {
+                const input = event.target;
+                const command = input.value.trim();
+                const output = document.getElementById('terminalOutput');
+                
+                if (!output) return;
+                
+                let response = '';
+                
+                switch (command.toLowerCase()) {
+                    case 'help':
+                        response = 'Available commands: help, clear, ps, whoami, date, uptime, uname, system, exit<br>';
+                        break;
+                    case 'clear':
+                        output.innerHTML = 'root@pusoy-workstation:~# ';
+                        input.value = '';
+                        return;
+                    case 'ps':
+                        response = 'PID  NAME              STATE       MEMORY<br>1000 Firefox           RUNNING     120MB<br>1001 PusoyCode         RUNNING     150MB<br>1002 Task Manager      RUNNING     35MB<br>';
+                        break;
+                    case 'whoami':
+                        response = 'root<br>';
+                        break;
+                    case 'date':
+                        response = new Date().toString() + '<br>';
+                        break;
+                    case 'uptime':
+                        response = 'System is running for approximately 1 hour<br>';
+                        break;
+                    case 'uname':
+                        response = 'PusoyOS 2.4.1 (pusoy-workstation) x86_64<br>';
+                        break;
+                    case 'system':
+                        response = 'CPU: 4 cores @ 2400MHz<br>RAM: 1024MB total<br>Kernel: 2.4.1-generic<br>Processes: Check task manager<br>';
+                        break;
+                    case 'exit':
+                        response = 'Exiting terminal...<br>';
+                        setTimeout(() => {
+                            const terminalWindow = document.querySelector('[id^="window-"]');
+                            if (terminalWindow) terminalWindow.remove();
+                        }, 100);
+                        break;
+                    case '':
+                        response = '';
+                        break;
+                    default:
+                        response = `Command not found: ${command}<br>Type 'help' for available commands<br>`;
+                }
+                
+                output.innerHTML += `${command}<br>${response}root@pusoy-workstation:~# `;
+                output.scrollTop = output.scrollHeight;
+                input.value = '';
+            }
+        }
+
+        // ========== System Monitoring ==========
+        async function updateSystemInfo() {
+            const sysInfo = await apiCall(`${API_BASE}/system-info`, 'GET');
+            const sys = sysInfo.system;
+            
+            document.getElementById('cpuUsage').textContent = `CPU: ${Math.round(sys.cpu_utilization)}%`;
+            document.getElementById('memUsage').textContent = `RAM: ${Math.round(sys.memory_percent)}%`;
+            
+            // Update time
+            const now = new Date();
+            document.getElementById('systemTime').textContent = 
+                now.getHours().toString().padStart(2, '0') + ':' + 
+                now.getMinutes().toString().padStart(2, '0');
+            
+            // Update task manager if open
+            if (windows['taskmanager']) {
+                updateProcessTable();
+            }
+        }
+
+        function showAlert(message, type = 'info') {
+            // Create temporary alert in desktop
+            const alert = document.createElement('div');
+            alert.className = `alert alert-${type}`;
+            alert.textContent = message;
+            alert.style.position = 'fixed';
+            alert.style.top = '10px';
+            alert.style.right = '10px';
+            alert.style.zIndex = '10000';
+            alert.style.maxWidth = '300px';
+            document.body.appendChild(alert);
+            
+            setTimeout(() => alert.remove(), 3000);
+        }
+
+        // ========== Initialization ==========
+        window.addEventListener('load', async () => {
+            // Hide app launcher
+            document.getElementById('appLauncher').classList.remove('active');
+            
+            // Load desktop
+            await loadDesktop();
+            
+            // Initial updates
+            await updateTaskbar();
+            await updateSystemInfo();
+            
+            // Auto-update every 2 seconds
+            setInterval(updateSystemInfo, 2000);
+            setInterval(updateTaskbar, 3000);
+            
+            // Load sample apps on startup
+            setTimeout(async () => {
+                await launchApplication('filemanager');
+                setTimeout(() => launchApplication('taskmanager'), 500);
+                setTimeout(() => launchApplication('settings'), 1000);
+            }, 500);
+        });
+
+        // Close app launcher when clicking outside
+        document.addEventListener('click', (e) => {
+            const launcher = document.getElementById('appLauncher');
+            const menuBtn = document.getElementById('appMenuBtn');
+            if (!launcher.contains(e.target) && !menuBtn.contains(e.target) && launcher.classList.contains('active')) {
+                launcher.classList.remove('active');
+            }
+        });
+    </script>
+</body>
+</html>

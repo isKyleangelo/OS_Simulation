@@ -1,0 +1,44 @@
+
+    ------------------------------------------------------------------
+       PusoyOS
+       2.4.1
+       Enhanced Interactive Edition v2.5.0
+    ------------------------------------------------------------------
+
+    NEW INTERACTIVE FEATURES:
+       - Real-time System Metrics Dashboard
+       - Performance History & Analytics
+       - Interactive Terminal Emulator
+       - Resource Forecasting
+       - System Health Monitoring
+       - Process Tree Visualization
+       - Event Logging System
+       - Advanced Algorithm Selection
+
+    API ENDPOINTS:
+       /api/system-metrics        - Real-time system status
+       /api/performance-history   - Historical performance data
+       /api/system-events         - Event log stream
+       /api/process-tree          - Process hierarchy
+       /api/resource-forecast     - Resource predictions
+       /api/system-health         - Health report
+       /api/terminal-command      - Execute shell commands
+       /api/analytics-report      - Comprehensive statistics
+
+    Server Information:
+       Hostname: pusoy-workstation
+         Running on http://127.0.0.1:8001
+       Version: 2.5.0 (Enhanced)
+       Status: ONLINE
+
+     Documentation: Visit http://127.0.0.1:8001 to access the UI
+    API Docs: All endpoints support JSON requests
+
+    Press CTRL+C to shutdown gracefully...
+    
+==================================================================
+System initialized and ready for simulation
+==================================================================
+
+ * Serving Flask app 'app'
+ * Debug mode: off
